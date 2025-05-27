@@ -1,573 +1,532 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+import streamlit as st
 import networkx as nx
-import matplotlib
-matplotlib.use('TkAgg')  # Set backend before importing pyplot
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import pandas as pd
+import io
+import base64
 from matplotlib.patches import ArrowStyle
-import csv
-import itertools
-from matplotlib.animation import FuncAnimation
-import platform
-from tkinter.font import Font
+import numpy as np
 
-# Tooltip replacement for idlelib.tooltip (EXE compatibility)
-class Hovertip:
-    def __init__(self, anchor_widget, text, hover_delay=1000):
-        self.anchor_widget = anchor_widget
-        self.text = text
-        self.hover_delay = hover_delay
-        self.tipwindow = None
-        self.id = None
-        self.x = self.y = 0
-        
-        self.anchor_widget.bind('<Enter>', self.enter)
-        self.anchor_widget.bind('<Leave>', self.leave)
-        
-    def enter(self, event=None):
-        self.schedule()
-        
-    def leave(self, event=None):
-        self.unschedule()
-        self.hidetip()
-        
-    def schedule(self):
-        self.unschedule()
-        self.id = self.anchor_widget.after(self.hover_delay, self.showtip)
-        
-    def unschedule(self):
-        id = self.id
-        self.id = None
-        if id:
-            self.anchor_widget.after_cancel(id)
+# Page configuration
+st.set_page_config(
+    page_title="Network Diagram Simulator",
+    page_icon="📊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(90deg, #4a6baf 0%, #6c757d 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+    .metric-card {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #4a6baf;
+        margin: 0.5rem 0;
+    }
+    .critical-path {
+        background: linear-gradient(90deg, #ff6b6b 0%, #ff8a5b 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+        text-align: center;
+        font-weight: bold;
+    }
+    .success-message {
+        background: #d4edda;
+        color: #155724;
+        padding: 0.75rem;
+        border-radius: 4px;
+        border: 1px solid #c3e6cb;
+        margin: 0.5rem 0;
+    }
+    .error-message {
+        background: #f8d7da;
+        color: #721c24;
+        padding: 0.75rem;
+        border-radius: 4px;
+        border: 1px solid #f5c6cb;
+        margin: 0.5rem 0;
+    }
+    .stDataFrame {
+        background: white;
+        border-radius: 8px;
+        padding: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+class NetworkDiagramApp:
+    def __init__(self):
+        if 'activities' not in st.session_state:
+            st.session_state.activities = []
+        if 'graph' not in st.session_state:
+            st.session_state.graph = nx.DiGraph()
+        if 'critical_path' not in st.session_state:
+            st.session_state.critical_path = []
+        if 'project_duration' not in st.session_state:
+            st.session_state.project_duration = 0
+        if 'float_table' not in st.session_state:
+            st.session_state.float_table = []
+
+    def add_activity(self, activity, start_node, end_node, duration):
+        """Add an activity to the network"""
+        try:
+            # Validation
+            if not all([activity.strip(), start_node.strip(), end_node.strip()]):
+                return False, "All fields must be filled"
             
-    def showtip(self, event=None):
-        try:
-            x, y, cx, cy = self.anchor_widget.bbox("insert")
-        except:
-            x = y = 0
-        x += self.anchor_widget.winfo_rootx() + 25
-        y += self.anchor_widget.winfo_rooty() + 25
-        
-        self.tipwindow = tw = tk.Toplevel(self.anchor_widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry("+%d+%d" % (x, y))
-        
-        label = tk.Label(tw, text=self.text, justify=tk.LEFT,
-                        background="#ffffe0", relief=tk.SOLID, borderwidth=1,
-                        font=("tahoma", "8", "normal"))
-        label.pack(ipadx=1)
-        
-    def hidetip(self):
-        tw = self.tipwindow
-        self.tipwindow = None
-        if tw:
-            tw.destroy()
-
-class ProjectNetworkApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Network Diagram Simulator")
-        self.graph = nx.DiGraph()
-        self.activities = []
-        self.critical_path = []
-        self.project_duration = 0
-        self.float_table = []
-        self.anim = None
-        self.text_animation = None
-
-        # Improved font settings
-        try:
-            if platform.system() == 'Windows':
-                font_family = 'Segoe UI'
-            else:
-                font_family = 'Arial'
-        except:
-            font_family = 'Arial'
+            if duration <= 0:
+                return False, "Duration must be positive"
             
-        self.large_font = Font(family=font_family, size=16, weight='bold')
-        self.medium_font = Font(family=font_family, size=14)
-        self.small_font = Font(family=font_family, size=12)
-        
-        # Modern color scheme
-        self.colors = {
-            'primary': '#4a6baf',
-            'secondary': '#6c757d',
-            'success': '#28a745',
-            'danger': '#dc3545',
-            'warning': '#ffc107',
-            'info': '#17a2b8',
-            'light': '#f8f9fa',
-            'dark': '#343a40',
-            'background': '#f0f2f5',
-            'text': '#212529'
-        }
-        
-        self.root.configure(bg=self.colors['background'])
-        self._setup_widgets()
-
-    def _setup_widgets(self):
-        # Input Frame with improved styling
-        self.input_frame = tk.Frame(self.root, bg='#ffffff', padx=15, pady=15, 
-                                   highlightbackground='#e0e0e0', highlightthickness=1)
-        self.input_frame.pack(pady=10, fill='x', padx=10)
-
-        labels = ["Activity", "Start Node", "End Node", "Duration"]
-        tooltips = [
-            "Unique identifier for each task\n\nExample: A, B, C, etc.",
-            "Beginning node of the activity\n\nMust connect to other nodes\nExample: 1, 2",
-            "Completion node of the activity\n\nMust differ from start node\nExample: 2, 3",
-            "Time required to complete activity\n\nMust be positive integer (days)\nExample: 3, 5, 10"
-        ]
-        self.entries = []
-        for i, (label, tip) in enumerate(zip(labels, tooltips)):
-            lbl = tk.Label(self.input_frame, text=label+":", bg='#ffffff', 
-                          font=self.medium_font, fg=self.colors['text'])
-            lbl.grid(row=0, column=i*2, padx=(0,5))
-            entry = tk.Entry(self.input_frame, font=self.medium_font, 
-                            bd=1, relief=tk.SOLID, highlightbackground='#e0e0e0',
-                            highlightcolor=self.colors['primary'], highlightthickness=1)
-            entry.grid(row=0, column=i*2+1, padx=5)
-            self.entries.append(entry)
-            Hovertip(entry, tip, hover_delay=300)
-        self.activity_entry, self.start_entry, self.end_entry, self.duration_entry = self.entries
-
-        # Status message area
-        self.error_label = tk.Label(self.root, text="", fg="#ffffff", bg=self.colors['primary'], 
-                                   font=self.medium_font, padx=10, pady=8, anchor='w')
-        self.error_label.pack(fill='x', padx=10)
-
-        # Button Frame with icons and improved styling
-        self.button_frame = tk.Frame(self.root, bg=self.colors['background'], pady=10)
-        self.button_frame.pack(fill='x', padx=10)
-
-        buttons = [
-            ("📝 Add Activity", self.add_activity, self.colors['primary'], "Add the current activity to the network"),
-            ("↩️ Undo Last", self.undo_last_activity, self.colors['warning'], "Remove the most recently added activity"),
-            ("🗑️ Clear All", self.clear_all, self.colors['danger'], "Reset the entire application"),
-            ("📊 Draw Network", self.draw_network, self.colors['success'], "Visualize the current network structure"),
-            ("🔍 Find Critical Path", self.compute_critical_path, self.colors['info'], "Calculate the longest path in the network"),
-            ("🎲 Dummy Data", self.add_dummy_data, self.colors['secondary'], "Load sample data for demonstration"),
-            ("💾 Save Image", self.save_diagram, '#6f42c1', "Export the diagram as image file"),
-            ("📤 Export CSV", self.export_to_csv, '#20c997', "Save activity data to spreadsheet")
-        ]
-
-        for i, (text, cmd, color, tip) in enumerate(buttons):
-            btn = tk.Button(self.button_frame, text=text, command=cmd, bg=color, fg='white',
-                          font=self.medium_font, relief='flat', padx=12, pady=8,
-                          activebackground=color, activeforeground='white',
-                          bd=0, highlightthickness=0, compound=tk.LEFT)
-            btn.grid(row=0, column=i, padx=3)
-            Hovertip(btn, tip, hover_delay=300)
-
-        # Main content area
-        self.body_frame = tk.Frame(self.root, bg=self.colors['background'])
-        self.body_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0,10))
-        self.body_frame.columnconfigure(0, weight=1)
-        self.body_frame.columnconfigure(1, weight=3)
-        self.body_frame.rowconfigure(0, weight=1)
-
-        # Table with single set of headers
-        style = ttk.Style()
-        try:
-            style.theme_use('clam')
-        except:
-            style.theme_use('default')
+            if start_node == end_node:
+                return False, "Start and end nodes must be different"
             
-        style.configure("Treeview.Heading", font=self.medium_font, 
-                       background=self.colors['primary'], foreground='white')
-        style.configure("Treeview", font=self.medium_font, rowheight=30,
-                      background='#ffffff', fieldbackground='#ffffff')
-        style.map("Treeview.Heading", background=[('active', '#3a5a8f')])
-        
-        # Create the table
-        self.table = ttk.Treeview(
-            self.body_frame,
-            columns=("Activity", "Start", "End", "Duration", "ES", "EF", "LS", "LF", "Float"),
-            show='headings',
-            style="Treeview"
-        )
-        
-        # Configure column headers
-        headers = {
-            "Activity": "Task identifier\n(e.g., A, B, C)",
-            "Start": "Starting node\n(where activity begins)",
-            "End": "Ending node\n(where activity completes)",
-            "Duration": "Time required\n(in days)",
-            "ES": "Earliest Start time\n(calculated from project start)",
-            "EF": "Earliest Finish time\n(ES + Duration)",
-            "LS": "Latest Start time\n(without delaying project)",
-            "LF": "Latest Finish time\n(without delaying project)",
-            "Float": "Slack time available\n(zero = critical activity)"
-        }
-        
-        for col in headers:
-            self.table.heading(col, text=col)
-            self.table.column(col, width=100, anchor='center')
-
-        # Add scrollbars
-        yscroll = ttk.Scrollbar(self.body_frame, orient='vertical', command=self.table.yview)
-        xscroll = ttk.Scrollbar(self.body_frame, orient='horizontal', command=self.table.xview)
-        self.table.configure(yscrollcommand=yscroll.set, xscrollcommand=xscroll.set)
-        
-        # Grid the widgets
-        self.table.grid(row=0, column=0, sticky='nsew', padx=(0,5))
-        yscroll.grid(row=0, column=1, sticky='ns')
-        xscroll.grid(row=1, column=0, sticky='ew')
-
-        # Result banner with improved styling
-        self.result_banner = tk.Frame(self.body_frame, bg=self.colors['light'], pady=12, padx=15, 
-                                    highlightbackground='#e0e6ed', highlightthickness=1)
-        self.result_banner.grid(row=1, column=0, sticky='ew', pady=(5,0))
-
-        self.result_label = tk.Label(
-            self.result_banner,
-            text="",
-            font=self.large_font,
-            fg=self.colors['dark'],
-            bg=self.colors['light'],
-            justify=tk.LEFT,
-            wraplength=450
-        )
-        self.result_label.pack(anchor='w')
-
-        # Canvas frame with improved styling
-        self.canvas_frame = tk.Frame(self.body_frame, bg='#ffffff', 
-                                   highlightbackground='#e0e6ed', highlightthickness=1)
-        self.canvas_frame.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(5,0))
-
-        # Configure matplotlib figure
-        try:
-            plt.style.use('ggplot')
-        except:
-            plt.style.use('default')
+            # Check for duplicate edges
+            if (start_node, end_node) in st.session_state.graph.edges:
+                return False, "This connection already exists"
             
-        self.figure, self.ax = plt.subplots(figsize=(7, 6), facecolor=self.colors['light'])
-        self.figure.subplots_adjust(left=0.1, right=0.95, top=0.95, bottom=0.1)
-        self.canvas = FigureCanvasTkAgg(self.figure, master=self.canvas_frame)
-        self.toolbar = NavigationToolbar2Tk(self.canvas, self.canvas_frame)
-        self.toolbar.update()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        # Watermark with improved styling
-        self.watermark_label = tk.Label(
-            self.root,
-            text="© Network Diagram Simulator | Developed by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy",
-            font=self.small_font, fg=self.colors['secondary'], bg=self.colors['background']
-        )
-        self.watermark_label.pack(side="bottom", pady=(0,10))
-
-    def add_activity(self):
-        try:
-            activity = self.activity_entry.get().strip()
-            start = self.start_entry.get().strip()
-            end = self.end_entry.get().strip()
-            duration = int(self.duration_entry.get().strip())
-
-            if not all([activity, start, end]) or duration <= 0:
-                raise ValueError("All fields must be filled with valid values.")
-
-            if (start, end) in self.graph.edges:
-                raise ValueError("This connection already exists.")
-
-            self.graph.add_edge(start, end, duration=duration, activity=activity)
-            self.activities.append((activity, start, end, duration))
-            self.table.insert('', 'end', values=(activity, start, end, duration, '', '', '', '', ''))
-
-            for entry in self.entries:
-                entry.delete(0, tk.END)
-            self.error_label.config(text="✓ Activity added successfully", bg=self.colors['success'])
-
-        except ValueError as e:
-            self.error_label.config(text=f"⚠ Error: {str(e)}", bg=self.colors['danger'])
+            # Add to graph and activities list
+            st.session_state.graph.add_edge(start_node, end_node, 
+                                          duration=duration, activity=activity)
+            st.session_state.activities.append((activity, start_node, end_node, duration))
+            
+            return True, "Activity added successfully"
+            
         except Exception as e:
-            self.error_label.config(text=f"⚠ Unexpected error: {str(e)}", bg=self.colors['danger'])
+            return False, f"Error: {str(e)}"
 
-    def undo_last_activity(self):
-        if self.activities:
-            last = self.activities.pop()
+    def remove_last_activity(self):
+        """Remove the last added activity"""
+        if st.session_state.activities:
+            last_activity = st.session_state.activities.pop()
+            activity, start, end, duration = last_activity
             try:
-                # Remove edge from graph
-                self.graph.remove_edge(last[1], last[2])
-                
-                # Find and remove the corresponding row from table
-                rows_to_delete = []
-                for row in self.table.get_children():
-                    row_values = self.table.item(row)['values']
-                    # Compare the first 4 values (Activity, Start, End, Duration)
-                    if (str(row_values[0]) == str(last[0]) and 
-                        str(row_values[1]) == str(last[1]) and 
-                        str(row_values[2]) == str(last[2]) and 
-                        str(row_values[3]) == str(last[3])):
-                        rows_to_delete.append(row)
-                
-                # Delete all matching rows (in case of duplicates)
-                for row in rows_to_delete:
-                    self.table.delete(row)
-                
-                # Clear any existing calculations
-                self.critical_path.clear()
-                self.float_table.clear()
-                self.project_duration = 0
-                self.result_label.config(text="")
-                
-                # Redraw network if there are still activities
-                if self.activities:
-                    self.draw_network()
-                else:
-                    self.ax.clear()
-                    self.canvas.draw()
-                
-                self.error_label.config(text="✓ Last activity removed", bg=self.colors['success'])
-                
-            except Exception as e:
-                # If there's an error, add the activity back
-                self.activities.append(last)
-                self.error_label.config(text=f"⚠ Error removing activity: {str(e)}", bg=self.colors['danger'])
-        else:
-            self.error_label.config(text="⚠ No activities to remove", bg=self.colors['warning'])
+                st.session_state.graph.remove_edge(start, end)
+                # Clear calculations
+                st.session_state.critical_path = []
+                st.session_state.float_table = []
+                st.session_state.project_duration = 0
+                return True, "Last activity removed"
+            except:
+                # If error, add back the activity
+                st.session_state.activities.append(last_activity)
+                return False, "Error removing activity"
+        return False, "No activities to remove"
 
-    def clear_all(self):
-        if self.anim:
-            self.anim.event_source.stop()
-        if self.text_animation:
-            self.root.after_cancel(self.text_animation)
-        
-        self.activities.clear()
-        self.graph.clear()
-        self.critical_path.clear()
-        self.project_duration = 0
-        self.float_table.clear()
-        for row in self.table.get_children():
-            self.table.delete(row)
-        self.result_label.config(text="")
-        self.ax.clear()
-        self.canvas.draw()
-        self.error_label.config(text="✓ All activities cleared", bg=self.colors['success'])
+    def clear_all_activities(self):
+        """Clear all activities and reset the graph"""
+        st.session_state.activities = []
+        st.session_state.graph = nx.DiGraph()
+        st.session_state.critical_path = []
+        st.session_state.project_duration = 0
+        st.session_state.float_table = []
+        return True, "All activities cleared"
 
     def compute_critical_path(self):
+        """Compute the critical path using CPM algorithm"""
         try:
-            if not self.activities:
-                raise ValueError("No activities to analyze")
+            if not st.session_state.activities:
+                return False, "No activities to analyze"
 
-            durations = nx.get_edge_attributes(self.graph, 'duration')
-            topo_order = list(nx.topological_sort(self.graph))
+            graph = st.session_state.graph
+            durations = nx.get_edge_attributes(graph, 'duration')
+            
+            # Check if graph is acyclic
+            if not nx.is_directed_acyclic_graph(graph):
+                return False, "Network contains cycles - invalid for CPM"
+            
+            topo_order = list(nx.topological_sort(graph))
             es, ef, ls, lf = {}, {}, {}, {}
 
-            # Forward pass
+            # Forward pass - calculate Early Start and Early Finish
             for node in topo_order:
-                es[node] = max((ef[p] for p in self.graph.predecessors(node)), default=0)
-                ef[node] = es[node] + max((durations.get((node, s), 0) for s in self.graph.successors(node)), default=0)
+                predecessors = list(graph.predecessors(node))
+                if predecessors:
+                    es[node] = max(ef[pred] for pred in predecessors)
+                else:
+                    es[node] = 0
+                
+                successors = list(graph.successors(node))
+                if successors:
+                    ef[node] = es[node] + max(durations.get((node, succ), 0) for succ in successors)
+                else:
+                    ef[node] = es[node]
 
-            project_duration = max(ef.values())
-            
-            # Backward pass
+            # Project duration is the maximum EF
+            project_duration = max(ef.values()) if ef else 0
+
+            # Backward pass - calculate Late Start and Late Finish
             for node in reversed(topo_order):
-                lf[node] = min((ls.get(s, project_duration) - durations.get((node, s), 0) for s in self.graph.successors(node)), default=project_duration)
-                ls[node] = lf[node] - max((durations.get((node, s), 0) for s in self.graph.successors(node)), default=0)
+                successors = list(graph.successors(node))
+                if successors:
+                    lf[node] = min(ls[succ] for succ in successors)
+                else:
+                    lf[node] = project_duration
+                
+                predecessors = list(graph.predecessors(node))
+                if predecessors:
+                    incoming_durations = [durations.get((pred, node), 0) for pred in predecessors]
+                    ls[node] = lf[node] - max(incoming_durations) if incoming_durations else lf[node]
+                else:
+                    ls[node] = lf[node]
 
-            # Calculate floats and identify critical path
-            self.critical_path.clear()
-            self.float_table.clear()
-            for u, v, data in self.graph.edges(data=True):
-                es_u = es[u]
-                ef_u = es_u + data['duration']
-                lf_v = lf[v]
-                ls_u = lf_v - data['duration']
-                fl = lf_v - ef_u
-                self.float_table.append((data['activity'], es_u, ef_u, ls_u, lf_v, fl))
-                if fl == 0:
-                    self.critical_path.append((u, v))
-
-            # Update table with calculated values
-            for i, row in enumerate(self.table.get_children()):
-                act = self.table.item(row)['values'][0]
-                for r in self.float_table:
-                    if r[0] == act:
-                        self.table.item(row, values=(r[0], self.table.item(row)['values'][1], 
-                                      self.table.item(row)['values'][2], self.table.item(row)['values'][3], 
-                                      r[1], r[2], r[3], r[4], r[5]))
-                        break
-
-            self.project_duration = project_duration
-            path_nodes = [u for u, v in self.critical_path] + [self.critical_path[-1][1]] if self.critical_path else []
+            # Calculate floats and identify critical activities
+            critical_path = []
+            float_table = []
             
-            # Display results with animation
-            self.result_label.config(text="")
-            self.animate_text(f"🔑 Critical Path: {' → '.join(path_nodes)}\n⏱️ Project Duration: {self.project_duration} days")
-            self.draw_network(es, lf, animate=True)
+            for u, v, data in graph.edges(data=True):
+                activity = data['activity']
+                duration = data['duration']
+                
+                es_u = es[u]
+                ef_u = es_u + duration
+                ls_u = ls[u]
+                lf_v = lf[v]
+                
+                # Total float calculation
+                total_float = lf_v - ef_u
+                
+                float_table.append({
+                    'Activity': activity,
+                    'ES': es_u,
+                    'EF': ef_u,
+                    'LS': ls_u,
+                    'LF': lf_v,
+                    'Float': total_float
+                })
+                
+                if total_float == 0:  # Critical activity
+                    critical_path.append((u, v))
+
+            # Update session state
+            st.session_state.critical_path = critical_path
+            st.session_state.project_duration = project_duration
+            st.session_state.float_table = float_table
+
+            return True, f"Critical path computed successfully. Project duration: {project_duration} days"
 
         except Exception as e:
-            self.error_label.config(text=f"⚠ Error: {str(e)}", bg=self.colors['danger'])
+            return False, f"Error computing critical path: {str(e)}"
 
-    def animate_text(self, msg):
-        if self.text_animation:
-            self.root.after_cancel(self.text_animation)
-        
-        colors = [self.colors['primary'], self.colors['info'], 
-                 self.colors['success'], self.colors['warning'],
-                 self.colors['danger'], '#6f42c1']
-        
-        def update(i=0):
-            color = colors[i % len(colors)]
-            self.result_label.config(fg=color)
-            self.text_animation = self.root.after(800, update, i+1)
-        
-        self.result_label.config(text=msg)
-        update()
+    def draw_network_diagram(self, highlight_critical=True):
+        """Draw the network diagram using matplotlib"""
+        if not st.session_state.activities:
+            return None
 
-    def draw_network(self, es_map=None, lf_map=None, animate=False):
-        if self.anim:
-            self.anim.event_source.stop()
-            
-        self.ax.clear()
-        pos = nx.spring_layout(self.graph, seed=42, k=0.8)
+        fig, ax = plt.subplots(figsize=(12, 8))
+        fig.patch.set_facecolor('#f8f9fa')
+        ax.set_facecolor('#ffffff')
+
+        graph = st.session_state.graph
         
-        # Color scheme
+        # Use spring layout for better visualization
+        pos = nx.spring_layout(graph, seed=42, k=1.5, iterations=50)
+        
+        # Color schemes
         base_node_color = '#e6f3ff'
         base_edge_color = '#a0aec0'
         critical_node_color = '#ff6b6b'
         critical_edge_color = '#ff3860'
         
-        # Draw base network with properly sized arrowheads
-        nx.draw_networkx_nodes(self.graph, pos, ax=self.ax, 
-                             node_color=base_node_color, 
-                             node_size=1200,
-                             edgecolors=self.colors['primary'],
-                             linewidths=2)
+        # Get critical nodes
+        critical_edges = set(st.session_state.critical_path)
+        critical_nodes = set()
+        for u, v in critical_edges:
+            critical_nodes.add(u)
+            critical_nodes.add(v)
         
-        # Draw edges with better looking arrows
-        nx.draw_networkx_edges(self.graph, pos, ax=self.ax, 
-                             edge_color=base_edge_color,
-                             width=1.5,
-                             arrows=True,
-                             arrowsize=15,  # Reduced arrow size
-                             arrowstyle='-|>',  # Standard arrow style
-                             node_size=1200)
+        # Draw all nodes
+        regular_nodes = [n for n in graph.nodes if n not in critical_nodes]
         
-        nx.draw_networkx_labels(self.graph, pos, ax=self.ax, 
-                              font_size=12,
-                              font_weight='bold',
-                              font_color=self.colors['dark'])
-
-        # Edge labels
-        edge_labels = {(u, v): f"{d['activity']}\n{d['duration']}" 
-                       for u, v, d in self.graph.edges(data=True)}
-        nx.draw_networkx_edge_labels(self.graph, pos, edge_labels=edge_labels, 
-                                   ax=self.ax, 
-                                   font_size=12,
-                                   bbox=dict(facecolor='white', 
-                                            edgecolor='none',
-                                            alpha=0.8))
-
-        # Add ES/LF labels if provided
-        if es_map and lf_map:
-            for node in self.graph.nodes:
-                x, y = pos[node]
-                self.ax.text(x, y + 0.12, f"ES={es_map.get(node, '')}", 
-                            fontsize=12, ha='center', color=self.colors['success'])
-                self.ax.text(x, y - 0.12, f"LF={lf_map.get(node, '')}", 
-                            fontsize=12, ha='center', color=self.colors['danger'])
-
-        # Critical path animation with flowing arrows
-        if animate and self.critical_path:
-            cp_edges = set(self.critical_path)
-            cp_nodes = set(u for u, v in cp_edges) | set(v for u, v in cp_edges)
-            
-            # Animation colors
-            pulse_colors = ['#ff3860', '#ff6b6b', '#ff8a5b', '#ffb347', '#ffdd59', '#f6e58d']
-            
-            # Create animated arrows for critical path
-            arrow_objects = []
-            for u, v in cp_edges:
-                x1, y1 = pos[u]
-                x2, y2 = pos[v]
-                arrow = self.ax.annotate("",
-                    xy=(x2, y2), xycoords='data',
-                    xytext=(x1, y1), textcoords='data',
-                    arrowprops=dict(arrowstyle='-|>',
-                                  color=pulse_colors[0],
-                                  lw=2,
-                                  shrinkA=12, shrinkB=12))
-                arrow_objects.append(arrow)
-            
-            def update(i):
-                color = pulse_colors[i % len(pulse_colors)]
-                
-                # Update all arrows
-                for arrow in arrow_objects:
-                    arrow.arrow_patch.set_color(color)
-                    arrow.arrow_patch.set_linewidth(2)
-                
-                # Update node colors
-                nx.draw_networkx_nodes(self.graph, pos, nodelist=cp_nodes, 
-                                     ax=self.ax, 
-                                     node_color=color,
-                                     node_size=1200,
-                                     edgecolors=self.colors['danger'],
-                                     linewidths=2)
-                
-                self.canvas.draw()
-
-            self.anim = FuncAnimation(self.figure, update, interval=600, cache_frame_data=False)
+        if regular_nodes:
+            nx.draw_networkx_nodes(graph, pos, nodelist=regular_nodes,
+                                 ax=ax, node_color=base_node_color,
+                                 node_size=1500, edgecolors='#4a6baf', linewidths=2)
         
-        self.ax.set_facecolor(self.colors['light'])
-        self.figure.set_facecolor(self.colors['light'])
-        self.canvas.draw()
+        if critical_nodes and highlight_critical:
+            nx.draw_networkx_nodes(graph, pos, nodelist=list(critical_nodes),
+                                 ax=ax, node_color=critical_node_color,
+                                 node_size=1500, edgecolors='#d63384', linewidths=3)
+        
+        # Draw edges
+        regular_edges = [(u, v) for u, v in graph.edges if (u, v) not in critical_edges]
+        
+        if regular_edges:
+            nx.draw_networkx_edges(graph, pos, edgelist=regular_edges,
+                                 ax=ax, edge_color=base_edge_color,
+                                 width=2, arrows=True, arrowsize=20,
+                                 arrowstyle='-|>', node_size=1500)
+        
+        if critical_edges and highlight_critical:
+            nx.draw_networkx_edges(graph, pos, edgelist=list(critical_edges),
+                                 ax=ax, edge_color=critical_edge_color,
+                                 width=3, arrows=True, arrowsize=20,
+                                 arrowstyle='-|>', node_size=1500)
+        
+        # Draw node labels
+        nx.draw_networkx_labels(graph, pos, ax=ax, font_size=14,
+                              font_weight='bold', font_color='#2c3e50')
+        
+        # Draw edge labels
+        edge_labels = {}
+        for u, v, data in graph.edges(data=True):
+            edge_labels[(u, v)] = f"{data['activity']}\n({data['duration']})"
+        
+        nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels,
+                                   ax=ax, font_size=10,
+                                   bbox=dict(boxstyle='round,pad=0.2',
+                                           facecolor='white',
+                                           edgecolor='gray',
+                                           alpha=0.8))
+        
+        ax.set_title("Project Network Diagram", fontsize=16, fontweight='bold', pad=20)
+        ax.axis('off')
+        
+        # Add legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor=base_node_color, edgecolor='#4a6baf', label='Regular Activity'),
+            Patch(facecolor=critical_node_color, edgecolor='#d63384', label='Critical Activity')
+        ]
+        ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
+        
+        plt.tight_layout()
+        return fig
 
     def add_dummy_data(self):
-        if not self.activities:
-            dummy = [("A", "1", "2", 4), ("B", "1", "3", 3), 
-                    ("C", "2", "4", 2), ("D", "3", "4", 5), 
-                    ("E", "4", "5", 1)]
-            for act, s, e, d in dummy:
-                self.graph.add_edge(s, e, duration=d, activity=act)
-                self.activities.append((act, s, e, d))
-                self.table.insert('', 'end', values=(act, s, e, d, '', '', '', '', ''))
-            self.error_label.config(text="✓ Sample data loaded successfully", bg=self.colors['success'])
+        """Add sample data for demonstration"""
+        if st.session_state.activities:
+            return False, "Clear existing data before loading sample data"
+        
+        dummy_activities = [
+            ("A", "1", "2", 4),
+            ("B", "1", "3", 3),
+            ("C", "2", "4", 2),
+            ("D", "3", "4", 5),
+            ("E", "4", "5", 1)
+        ]
+        
+        for activity, start, end, duration in dummy_activities:
+            st.session_state.graph.add_edge(start, end, duration=duration, activity=activity)
+            st.session_state.activities.append((activity, start, end, duration))
+        
+        return True, "Sample data loaded successfully"
+
+def main():
+    app = NetworkDiagramApp()
+    
+    # Header
+    st.markdown("""
+    <div class="main-header">
+        <h1>📊 Network Diagram Simulator</h1>
+        <p>Critical Path Method (CPM) Analysis Tool</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Sidebar for input
+    with st.sidebar:
+        st.header("📝 Add Activity")
+        
+        with st.form("activity_form"):
+            activity = st.text_input("Activity ID", placeholder="e.g., A, B, C")
+            start_node = st.text_input("Start Node", placeholder="e.g., 1, 2")
+            end_node = st.text_input("End Node", placeholder="e.g., 2, 3")
+            duration = st.number_input("Duration (days)", min_value=1, value=1)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submit_button = st.form_submit_button("➕ Add Activity", use_container_width=True)
+            with col2:
+                dummy_button = st.form_submit_button("🎲 Load Sample", use_container_width=True)
+        
+        # Handle form submissions
+        if submit_button:
+            success, message = app.add_activity(activity, start_node, end_node, duration)
+            if success:
+                st.success(message)
+                st.rerun()
+            else:
+                st.error(message)
+        
+        if dummy_button:
+            success, message = app.add_dummy_data()
+            if success:
+                st.success(message)
+                st.rerun()
+            else:
+                st.warning(message)
+        
+        st.divider()
+        
+        # Action buttons
+        st.header("🛠️ Actions")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("↩️ Undo Last", use_container_width=True):
+                success, message = app.remove_last_activity()
+                if success:
+                    st.success(message)
+                    st.rerun()
+                else:
+                    st.warning(message)
+        
+        with col2:
+            if st.button("🗑️ Clear All", use_container_width=True):
+                success, message = app.clear_all_activities()
+                st.success(message)
+                st.rerun()
+        
+        if st.button("🔍 Compute Critical Path", use_container_width=True, type="primary"):
+            success, message = app.compute_critical_path()
+            if success:
+                st.success(message)
+                st.rerun()
+            else:
+                st.error(message)
+
+    # Main content area
+    if st.session_state.activities:
+        # Create activity dataframe
+        activity_df = pd.DataFrame(st.session_state.activities, 
+                                 columns=['Activity', 'Start Node', 'End Node', 'Duration'])
+        
+        # Add computed values if available
+        if st.session_state.float_table:
+            float_df = pd.DataFrame(st.session_state.float_table)
+            # Merge the dataframes
+            merged_df = activity_df.merge(float_df[['Activity', 'ES', 'EF', 'LS', 'LF', 'Float']], 
+                                        on='Activity', how='left')
+            display_df = merged_df
         else:
-            self.error_label.config(text="⚠ Clear existing data before loading sample", bg=self.colors['warning'])
+            # Add empty columns for ES, EF, LS, LF, Float
+            for col in ['ES', 'EF', 'LS', 'LF', 'Float']:
+                activity_df[col] = ''
+            display_df = activity_df
+        
+        # Display results
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.subheader("📋 Activity Table")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        
+        with col2:
+            st.subheader("📊 Project Metrics")
+            
+            if st.session_state.project_duration > 0:
+                st.metric("Project Duration", f"{st.session_state.project_duration} days")
+                
+                # Critical path display
+                if st.session_state.critical_path:
+                    critical_activities = []
+                    for u, v in st.session_state.critical_path:
+                        for act, s, e, d in st.session_state.activities:
+                            if s == u and e == v:
+                                critical_activities.append(act)
+                                break
+                    
+                    st.markdown(f"""
+                    <div class="critical-path">
+                        🔑 Critical Path<br>
+                        {' → '.join(critical_activities)}
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Float analysis
+                if st.session_state.float_table:
+                    critical_count = sum(1 for item in st.session_state.float_table if item['Float'] == 0)
+                    total_activities = len(st.session_state.float_table)
+                    
+                    st.metric("Critical Activities", f"{critical_count}/{total_activities}")
+                    
+                    avg_float = np.mean([item['Float'] for item in st.session_state.float_table])
+                    st.metric("Average Float", f"{avg_float:.1f} days")
+            else:
+                st.info("🔍 Click 'Compute Critical Path' to analyze the network")
+        
+        # Display network diagram
+        st.subheader("🕸️ Network Diagram")
+        
+        fig = app.draw_network_diagram(highlight_critical=st.session_state.project_duration > 0)
+        if fig:
+            st.pyplot(fig, use_container_width=True)
+            
+            # Download options
+            col1, col2 = st.columns(2)
+            with col1:
+                # Save plot as PNG
+                img_buffer = io.BytesIO()
+                fig.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+                img_buffer.seek(0)
+                
+                st.download_button(
+                    label="💾 Download Diagram (PNG)",
+                    data=img_buffer.getvalue(),
+                    file_name="network_diagram.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
+            
+            with col2:
+                # Export data as CSV
+                csv_buffer = io.StringIO()
+                display_df.to_csv(csv_buffer, index=False)
+                
+                st.download_button(
+                    label="📤 Export Data (CSV)",
+                    data=csv_buffer.getvalue(),
+                    file_name="project_activities.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            
+            plt.close(fig)  # Clean up memory
+    
+    else:
+        st.info("👈 Add activities using the sidebar to get started, or load sample data to see a demonstration.")
+        
+        # Show some help text
+        with st.expander("ℹ️ How to use this application"):
+            st.markdown("""
+            **Step 1: Add Activities**
+            - Enter a unique Activity ID (e.g., A, B, C)
+            - Specify Start and End nodes (e.g., 1, 2, 3)
+            - Enter the duration in days
+            - Click "Add Activity"
+            
+            **Step 2: Build Your Network**
+            - Add multiple activities that connect to form a project network
+            - Activities should connect start-to-finish to show dependencies
+            
+            **Step 3: Analyze**
+            - Click "Compute Critical Path" to perform CPM analysis
+            - View the critical path, project duration, and activity floats
+            - The diagram will highlight critical activities in red
+            
+            **Tips:**
+            - Use "Load Sample" to see an example project
+            - Critical activities have zero float and determine project duration
+            - Non-critical activities have positive float (slack time)
+            """)
 
-    def save_diagram(self):
-        try:
-            file = filedialog.asksaveasfilename(
-                defaultextension=".png",
-                filetypes=[("PNG Image", "*.png"), 
-                          ("JPEG Image", "*.jpg"), 
-                          ("PDF Document", "*.pdf"),
-                          ("SVG Vector", "*.svg")],
-                title="Save Network Diagram"
-            )
-            if file:
-                self.figure.savefig(file, dpi=300, bbox_inches='tight', facecolor=self.figure.get_facecolor())
-                self.error_label.config(text=f"✓ Diagram saved to {file}", bg=self.colors['success'])
-        except Exception as e:
-            self.error_label.config(text=f"⚠ Error saving file: {str(e)}", bg=self.colors['danger'])
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "© Network Diagram Simulator | Web App Version | "
+        "Original by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy"
+    )
 
-    def export_to_csv(self):
-        try:
-            file = filedialog.asksaveasfilename(
-                defaultextension=".csv",
-                filetypes=[("CSV Files", "*.csv"), 
-                          ("Excel Files", "*.xlsx")],
-                title="Export Activity Data"
-            )
-            if file:
-                with open(file, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(["Activity", "Start Node", "End Node", "Duration"])
-                    writer.writerows(self.activities)
-                self.error_label.config(text=f"✓ Data exported to {file}", bg=self.colors['success'])
-        except Exception as e:
-            self.error_label.config(text=f"⚠ Error exporting file: {str(e)}", bg=self.colors['danger'])
-
-if __name__ == '__main__':
-    try:
-        root = tk.Tk()
-        root.geometry("1280x800")
-        root.minsize(1024, 600)
-        app = ProjectNetworkApp(root)
-        root.mainloop()
-    except Exception as e:
-        messagebox.showerror("Application Error", f"Failed to start application: {str(e)}")
+if __name__ == "__main__":
+    main()
