@@ -1,0 +1,1 @@
+Project Network Simulator is a Python-based simulation tool designed to model and visualize computer networks, allowing users to experiment with network topologies, routing protocols, and data transmission in a controlled environment. It's ideal for students, educators, and networking enthusiasts who want to understand the dynamics of network communication.
