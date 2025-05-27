@@ -391,12 +391,12 @@ class NetworkDiagramApp:
             return nx.spring_layout(graph, seed=42, k=2.0, iterations=100)
 
     def draw_network_diagram(self):
-        """Draw clean network diagram with proper layout"""
+        """Draw enhanced network diagram with ES/LF values and animated critical path"""
         if not st.session_state.activities:
             return None
 
         # Create figure with clean styling
-        fig, ax = plt.subplots(figsize=(14, 10))
+        fig, ax = plt.subplots(figsize=(16, 12))
         fig.patch.set_facecolor('white')
         ax.set_facecolor('white')
         
@@ -405,19 +405,20 @@ class NetworkDiagramApp:
         # Use hierarchical layout to minimize crossings
         pos = self.calculate_hierarchical_layout()
         
-        # Define colors
-        regular_node_color = '#e3f2fd'
-        critical_node_color = '#ffebee'
-        node_border_color = '#1976d2'
-        critical_border_color = '#d32f2f'
-        regular_edge_color = '#90a4ae'
-        critical_edge_color = '#f44336'
+        # Define enhanced colors with gradients
+        regular_node_color = '#e8f5e8'
+        critical_node_color = '#ffe6e6'
+        node_border_color = '#2e7d32'
+        critical_border_color = '#c62828'
+        regular_edge_color = '#78909c'
+        critical_edge_color = '#e53935'
+        critical_path_highlight = '#ff1744'
         
         # Get critical elements
         critical_edges = set(st.session_state.critical_path)
         critical_nodes = set(st.session_state.critical_path_nodes)
         
-        # Draw nodes with better styling
+        # Draw nodes with enhanced styling and larger size for ES/LF values
         all_nodes = list(graph.nodes())
         regular_nodes = [n for n in all_nodes if n not in critical_nodes]
         
@@ -425,101 +426,202 @@ class NetworkDiagramApp:
         if regular_nodes:
             nx.draw_networkx_nodes(graph, pos, nodelist=regular_nodes,
                                  node_color=regular_node_color,
-                                 node_size=2000,
+                                 node_size=3500,
                                  edgecolors=node_border_color,
-                                 linewidths=2.5,
-                                 ax=ax)
+                                 linewidths=3,
+                                 ax=ax,
+                                 alpha=0.9)
         
-        # Critical nodes
+        # Critical nodes with pulsing effect (using different alpha and colors)
         if critical_nodes:
+            # Main critical nodes
             nx.draw_networkx_nodes(graph, pos, nodelist=list(critical_nodes),
                                  node_color=critical_node_color,
-                                 node_size=2000,
+                                 node_size=3500,
                                  edgecolors=critical_border_color,
-                                 linewidths=3,
-                                 ax=ax)
+                                 linewidths=4,
+                                 ax=ax,
+                                 alpha=0.95)
+            
+            # Add a glow effect for critical nodes
+            nx.draw_networkx_nodes(graph, pos, nodelist=list(critical_nodes),
+                                 node_color=critical_path_highlight,
+                                 node_size=4000,
+                                 edgecolors='none',
+                                 ax=ax,
+                                 alpha=0.2)
         
-        # Draw edges with better arrow styling
+        # Draw edges with enhanced styling
         regular_edges = [(u, v) for u, v in graph.edges() if (u, v) not in critical_edges]
         
         # Regular edges
         if regular_edges:
             nx.draw_networkx_edges(graph, pos, edgelist=regular_edges,
                                  edge_color=regular_edge_color,
-                                 width=2,
-                                 arrows=True,
-                                 arrowsize=25,
-                                 arrowstyle='-|>',
-                                 node_size=2000,
-                                 ax=ax,
-                                 connectionstyle="arc3,rad=0.1")
-        
-        # Critical edges
-        if critical_edges:
-            nx.draw_networkx_edges(graph, pos, edgelist=list(critical_edges),
-                                 edge_color=critical_edge_color,
-                                 width=4,
+                                 width=2.5,
                                  arrows=True,
                                  arrowsize=30,
                                  arrowstyle='-|>',
-                                 node_size=2000,
+                                 node_size=3500,
                                  ax=ax,
-                                 connectionstyle="arc3,rad=0.1")
+                                 connectionstyle="arc3,rad=0.1",
+                                 alpha=0.8)
         
-        # Node labels
-        nx.draw_networkx_labels(graph, pos, 
-                              font_size=14, 
-                              font_weight='bold',
-                              font_family='Arial',
-                              ax=ax)
+        # Critical edges with multiple layers for glow effect
+        if critical_edges:
+            # Outer glow
+            nx.draw_networkx_edges(graph, pos, edgelist=list(critical_edges),
+                                 edge_color=critical_path_highlight,
+                                 width=8,
+                                 arrows=True,
+                                 arrowsize=35,
+                                 arrowstyle='-|>',
+                                 node_size=3500,
+                                 ax=ax,
+                                 connectionstyle="arc3,rad=0.1",
+                                 alpha=0.3)
+            
+            # Main critical path
+            nx.draw_networkx_edges(graph, pos, edgelist=list(critical_edges),
+                                 edge_color=critical_edge_color,
+                                 width=5,
+                                 arrows=True,
+                                 arrowsize=32,
+                                 arrowstyle='-|>',
+                                 node_size=3500,
+                                 ax=ax,
+                                 connectionstyle="arc3,rad=0.1",
+                                 alpha=0.9)
         
-        # Edge labels with better positioning
+        # Enhanced node labels with ES and LF values
+        if st.session_state.analysis_results:
+            node_times = st.session_state.analysis_results.get('node_times', {})
+            es_values = node_times.get('es', {})
+            lf_values = node_times.get('lf', {})
+            
+            # Create enhanced labels
+            enhanced_labels = {}
+            for node in all_nodes:
+                es = es_values.get(node, 0)
+                lf = lf_values.get(node, 0)
+                enhanced_labels[node] = f"{node}\nES:{es}\nLF:{lf}"
+        else:
+            enhanced_labels = {node: str(node) for node in all_nodes}
+        
+        # Draw node labels with better formatting
+        for node, (x, y) in pos.items():
+            label = enhanced_labels[node]
+            color = 'darkred' if node in critical_nodes else 'darkgreen'
+            weight = 'bold' if node in critical_nodes else 'normal'
+            
+            ax.text(x, y, label, 
+                   horizontalalignment='center',
+                   verticalalignment='center',
+                   fontsize=12,
+                   fontweight=weight,
+                   color=color,
+                   bbox=dict(boxstyle="round,pad=0.1", 
+                           facecolor='white', 
+                           edgecolor='none',
+                           alpha=0.8))
+        
+        # Enhanced edge labels with activity and duration
         edge_labels = {}
         for u, v, data in graph.edges(data=True):
-            edge_labels[(u, v)] = f"{data['activity']}\n({data['duration']}d)"
+            activity = data['activity']
+            duration = data['duration']
+            is_critical = (u, v) in critical_edges
+            
+            if is_critical:
+                edge_labels[(u, v)] = f"⭐ {activity}\n({duration}d)"
+            else:
+                edge_labels[(u, v)] = f"{activity}\n({duration}d)"
         
-        nx.draw_networkx_edge_labels(graph, pos, edge_labels,
-                                   font_size=11,
-                                   font_weight='bold',
-                                   bbox=dict(boxstyle="round,pad=0.3",
-                                           facecolor='white',
-                                           edgecolor='gray',
-                                           alpha=0.9),
-                                   ax=ax)
+        # Position edge labels
+        for (u, v), label in edge_labels.items():
+            x1, y1 = pos[u]
+            x2, y2 = pos[v]
+            x = (x1 + x2) / 2
+            y = (y1 + y2) / 2 + 0.2  # Slight offset
+            
+            is_critical = (u, v) in critical_edges
+            bbox_color = '#ffcdd2' if is_critical else 'white'
+            text_color = '#b71c1c' if is_critical else '#37474f'
+            font_weight = 'bold' if is_critical else 'normal'
+            
+            ax.text(x, y, label,
+                   horizontalalignment='center',
+                   verticalalignment='center',
+                   fontsize=11,
+                   fontweight=font_weight,
+                   color=text_color,
+                   bbox=dict(boxstyle="round,pad=0.4",
+                           facecolor=bbox_color,
+                           edgecolor='gray' if not is_critical else '#f44336',
+                           alpha=0.95,
+                           linewidth=2 if is_critical else 1))
         
-        # Clean up the plot
-        ax.set_title("Project Network Diagram", 
-                    fontsize=18, 
+        # Enhanced title
+        ax.set_title("Project Network Diagram with Critical Path Analysis", 
+                    fontsize=20, 
                     fontweight='bold', 
-                    pad=30,
-                    color='#2c3e50')
+                    pad=40,
+                    color='#1a237e')
+        
+        # Add subtitle with project info
+        if st.session_state.project_duration:
+            ax.text(0.5, 0.95, f"Project Duration: {st.session_state.project_duration} days", 
+                   transform=ax.transAxes,
+                   horizontalalignment='center',
+                   fontsize=14,
+                   color='#d32f2f',
+                   weight='bold')
+        
         ax.axis('off')
         
-        # Add legend
+        # Enhanced legend with more details
         from matplotlib.lines import Line2D
         legend_elements = [
             Line2D([0], [0], marker='o', color='w', 
                    markerfacecolor=regular_node_color, 
                    markeredgecolor=node_border_color,
-                   markersize=15, markeredgewidth=2,
-                   label='Regular Node'),
+                   markersize=18, markeredgewidth=3,
+                   label='Regular Node (ES/LF)'),
             Line2D([0], [0], marker='o', color='w', 
                    markerfacecolor=critical_node_color, 
                    markeredgecolor=critical_border_color,
-                   markersize=15, markeredgewidth=3,
-                   label='Critical Node'),
+                   markersize=18, markeredgewidth=4,
+                   label='Critical Node (ES/LF)'),
             Line2D([0], [0], color=regular_edge_color, 
-                   linewidth=2, label='Regular Activity'),
+                   linewidth=3, label='Regular Activity'),
             Line2D([0], [0], color=critical_edge_color, 
-                   linewidth=4, label='Critical Activity')
+                   linewidth=5, label='Critical Path Activity'),
+            Line2D([0], [0], marker='*', color=critical_path_highlight, 
+                   markersize=15, linewidth=0,
+                   label='Critical Path Highlight')
         ]
         
         ax.legend(handles=legend_elements, 
-                 loc='upper right', 
+                 loc='upper left', 
                  fontsize=12,
                  frameon=True,
                  fancybox=True,
-                 shadow=True)
+                 shadow=True,
+                 title="Legend",
+                 title_fontsize=14)
+        
+        # Add critical path sequence as text
+        if st.session_state.critical_path_nodes:
+            path_text = " → ".join(str(node) for node in st.session_state.critical_path_nodes)
+            ax.text(0.02, 0.02, f"Critical Path: {path_text}", 
+                   transform=ax.transAxes,
+                   fontsize=12,
+                   bbox=dict(boxstyle="round,pad=0.5",
+                           facecolor='#ffebee',
+                           edgecolor='#f44336',
+                           alpha=0.9),
+                   color='#b71c1c',
+                   weight='bold')
         
         plt.tight_layout()
         return fig
@@ -679,22 +781,94 @@ def main():
     if st.session_state.analysis_results:
         st.markdown("### 📊 Activity Analysis")
         
-        # Create clean dataframe
+        # Create comprehensive dataframe with all analysis elements
         analysis_data = st.session_state.analysis_results['activities']
         df = pd.DataFrame(analysis_data)
         
-        # Reorder and rename columns for clarity
-        display_df = df[['Activity', 'Start_Node', 'End_Node', 'Duration', 'ES', 'EF', 'LS', 'LF', 'Float']].copy()
-        display_df.columns = ['Activity', 'Start', 'End', 'Duration', 'ES', 'EF', 'LS', 'LF', 'Float']
+        # Calculate additional derived values
+        df['Free_Float'] = df['Float']  # In simple networks, Total Float = Free Float
+        df['Critical'] = df['Float'] == 0
+        df['Earliest_Duration'] = df['EF'] - df['ES']
+        df['Latest_Duration'] = df['LF'] - df['LS']
         
-        # Highlight critical activities
-        def highlight_critical(row):
-            if row['Float'] == 0:
-                return ['background-color: #ffebee'] * len(row)
-            return [''] * len(row)
+        # Reorder and rename columns for comprehensive display
+        display_df = df[['Activity', 'Start_Node', 'End_Node', 'Duration', 'ES', 'EF', 'LS', 'LF', 'Float', 'Free_Float', 'Critical']].copy()
+        display_df.columns = ['Activity', 'Start Node', 'End Node', 'Duration (days)', 'Early Start (ES)', 
+                             'Early Finish (EF)', 'Late Start (LS)', 'Late Finish (LF)', 
+                             'Total Float', 'Free Float', 'Critical?']
         
-        styled_df = display_df.style.apply(highlight_critical, axis=1)
+        # Advanced styling function
+        def style_analysis_table(row):
+            styles = [''] * len(row)
+            if row['Critical?']:
+                # Critical activities - red highlighting
+                styles = ['background-color: #ffcdd2; font-weight: bold; color: #b71c1c'] * len(row)
+            elif row['Total Float'] <= 1:
+                # Near-critical activities - yellow highlighting
+                styles = ['background-color: #fff9c4; color: #f57f17'] * len(row)
+            else:
+                # Regular activities - light green
+                styles = ['background-color: #e8f5e8; color: #2e7d32'] * len(row)
+            return styles
+        
+        # Apply enhanced styling
+        styled_df = display_df.style.apply(style_analysis_table, axis=1)
+        
+        # Add formatting for numeric columns
+        styled_df = styled_df.format({
+            'Duration (days)': '{:.0f}',
+            'Early Start (ES)': '{:.1f}',
+            'Early Finish (EF)': '{:.1f}',
+            'Late Start (LS)': '{:.1f}',
+            'Late Finish (LF)': '{:.1f}',
+            'Total Float': '{:.1f}',
+            'Free Float': '{:.1f}',
+            'Critical?': lambda x: '⭐ YES' if x else 'No'
+        })
+        
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        
+        # Add summary statistics
+        st.markdown("#### 📈 Summary Statistics")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            critical_activities = df[df['Critical']]['Activity'].tolist()
+            st.info(f"**Critical Activities:**\n{', '.join(critical_activities)}")
+        
+        with col2:
+            max_float = df['Float'].max()
+            activities_with_max_float = df[df['Float'] == max_float]['Activity'].tolist()
+            st.info(f"**Most Flexible Activity:**\n{', '.join(activities_with_max_float)}\n(Float: {max_float:.1f} days)")
+        
+        with col3:
+            avg_duration = df['Duration'].mean()
+            st.info(f"**Average Activity Duration:**\n{avg_duration:.1f} days")
+        
+        with col4:
+            total_work = df['Duration'].sum()
+            st.info(f"**Total Work Content:**\n{total_work:.0f} person-days")
+        
+        # Critical path efficiency metrics
+        st.markdown("#### ⚡ Critical Path Analysis")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            critical_work = df[df['Critical']]['Duration'].sum()
+            efficiency = (critical_work / total_work) * 100
+            st.metric("Critical Path Efficiency", f"{efficiency:.1f}%", 
+                     help="Percentage of total work on critical path")
+        
+        with col2:
+            non_critical_activities = len(df[~df['Critical']])
+            float_distribution = df[~df['Critical']]['Float'].describe()
+            if non_critical_activities > 0:
+                avg_float = float_distribution['mean']
+                st.metric("Average Float (Non-Critical)", f"{avg_float:.1f} days",
+                         help="Average slack time for non-critical activities")
+            else:
+                st.metric("Average Float (Non-Critical)", "N/A",
+                         help="All activities are critical")
         
         # Download options
         col1, col2 = st.columns(2)
