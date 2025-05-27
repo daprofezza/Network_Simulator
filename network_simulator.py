@@ -3,9 +3,9 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import pandas as pd
 import io
-import base64
-from matplotlib.patches import ArrowStyle
 import numpy as np
+from matplotlib.patches import FancyBboxPatch
+import math
 
 # Page configuration
 st.set_page_config(
@@ -15,53 +15,55 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Clean CSS styling
 st.markdown("""
 <style>
     .main-header {
-        background: linear-gradient(90deg, #4a6baf 0%, #6c757d 100%);
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
+        padding: 2rem;
+        border-radius: 15px;
         text-align: center;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
-    .metric-card {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #4a6baf;
-        margin: 0.5rem 0;
+    .metric-container {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        margin: 1rem 0;
+        border-left: 4px solid #667eea;
     }
-    .critical-path {
-        background: linear-gradient(90deg, #ff6b6b 0%, #ff8a5b 100%);
+    .critical-path-display {
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
         color: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        text-align: center;
+        font-size: 1.1rem;
+        font-weight: bold;
+        margin: 1rem 0;
+        box-shadow: 0 4px 15px rgba(255,107,107,0.3);
+    }
+    .info-box {
+        background: #e8f4fd;
+        border: 1px solid #bee5eb;
+        color: #0c5460;
         padding: 1rem;
         border-radius: 8px;
         margin: 1rem 0;
-        text-align: center;
-        font-weight: bold;
-    }
-    .success-message {
-        background: #d4edda;
-        color: #155724;
-        padding: 0.75rem;
-        border-radius: 4px;
-        border: 1px solid #c3e6cb;
-        margin: 0.5rem 0;
-    }
-    .error-message {
-        background: #f8d7da;
-        color: #721c24;
-        padding: 0.75rem;
-        border-radius: 4px;
-        border: 1px solid #f5c6cb;
-        margin: 0.5rem 0;
     }
     .stDataFrame {
-        background: white;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        border-radius: 10px;
+    }
+    .sidebar .stButton > button {
+        width: 100%;
         border-radius: 8px;
-        padding: 1rem;
+        border: none;
+        font-weight: 600;
+        transition: all 0.3s ease;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -76,14 +78,19 @@ class NetworkDiagramApp:
             st.session_state.critical_path = []
         if 'project_duration' not in st.session_state:
             st.session_state.project_duration = 0
-        if 'float_table' not in st.session_state:
-            st.session_state.float_table = []
+        if 'analysis_results' not in st.session_state:
+            st.session_state.analysis_results = {}
 
     def add_activity(self, activity, start_node, end_node, duration):
-        """Add an activity to the network"""
+        """Add an activity to the network with validation"""
         try:
+            # Clean inputs
+            activity = activity.strip().upper()
+            start_node = start_node.strip()
+            end_node = end_node.strip()
+            
             # Validation
-            if not all([activity.strip(), start_node.strip(), end_node.strip()]):
+            if not all([activity, start_node, end_node]):
                 return False, "All fields must be filled"
             
             if duration <= 0:
@@ -92,241 +99,388 @@ class NetworkDiagramApp:
             if start_node == end_node:
                 return False, "Start and end nodes must be different"
             
+            # Check for duplicate activity names
+            existing_activities = [act[0] for act in st.session_state.activities]
+            if activity in existing_activities:
+                return False, f"Activity '{activity}' already exists"
+            
             # Check for duplicate edges
-            if (start_node, end_node) in st.session_state.graph.edges:
-                return False, "This connection already exists"
+            if st.session_state.graph.has_edge(start_node, end_node):
+                return False, "Connection between these nodes already exists"
             
             # Add to graph and activities list
             st.session_state.graph.add_edge(start_node, end_node, 
                                           duration=duration, activity=activity)
             st.session_state.activities.append((activity, start_node, end_node, duration))
             
-            return True, "Activity added successfully"
+            # Clear previous analysis
+            st.session_state.critical_path = []
+            st.session_state.project_duration = 0
+            st.session_state.analysis_results = {}
+            
+            return True, f"Activity '{activity}' added successfully"
             
         except Exception as e:
             return False, f"Error: {str(e)}"
 
     def remove_last_activity(self):
         """Remove the last added activity"""
-        if st.session_state.activities:
+        if not st.session_state.activities:
+            return False, "No activities to remove"
+        
+        try:
             last_activity = st.session_state.activities.pop()
             activity, start, end, duration = last_activity
-            try:
-                st.session_state.graph.remove_edge(start, end)
-                # Clear calculations
-                st.session_state.critical_path = []
-                st.session_state.float_table = []
-                st.session_state.project_duration = 0
-                return True, "Last activity removed"
-            except:
-                # If error, add back the activity
+            st.session_state.graph.remove_edge(start, end)
+            
+            # Clear analysis
+            st.session_state.critical_path = []
+            st.session_state.project_duration = 0
+            st.session_state.analysis_results = {}
+            
+            return True, f"Activity '{activity}' removed"
+        except Exception as e:
+            # Restore activity if error occurs
+            if 'last_activity' in locals():
                 st.session_state.activities.append(last_activity)
-                return False, "Error removing activity"
-        return False, "No activities to remove"
+            return False, f"Error removing activity: {str(e)}"
 
     def clear_all_activities(self):
-        """Clear all activities and reset the graph"""
+        """Clear all activities and reset"""
         st.session_state.activities = []
         st.session_state.graph = nx.DiGraph()
         st.session_state.critical_path = []
         st.session_state.project_duration = 0
-        st.session_state.float_table = []
+        st.session_state.analysis_results = {}
         return True, "All activities cleared"
 
     def compute_critical_path(self):
-        """Compute the critical path using CPM algorithm"""
+        """Fixed critical path computation using CPM algorithm"""
         try:
             if not st.session_state.activities:
                 return False, "No activities to analyze"
 
             graph = st.session_state.graph
-            durations = nx.get_edge_attributes(graph, 'duration')
             
-            # Check if graph is acyclic
+            # Verify graph is acyclic
             if not nx.is_directed_acyclic_graph(graph):
-                return False, "Network contains cycles - invalid for CPM"
+                return False, "Network contains cycles - invalid for CPM analysis"
             
+            # Get all nodes and sort topologically
+            nodes = list(graph.nodes())
             topo_order = list(nx.topological_sort(graph))
-            es, ef, ls, lf = {}, {}, {}, {}
-
-            # Forward pass - calculate Early Start and Early Finish
+            
+            # Initialize dictionaries
+            es = {node: 0 for node in nodes}  # Early Start
+            ef = {node: 0 for node in nodes}  # Early Finish
+            ls = {node: 0 for node in nodes}  # Late Start
+            lf = {node: 0 for node in nodes}  # Late Finish
+            
+            # Forward pass - calculate ES and EF
             for node in topo_order:
+                # Early Start = max of all predecessor Early Finish times
                 predecessors = list(graph.predecessors(node))
                 if predecessors:
-                    es[node] = max(ef[pred] for pred in predecessors)
+                    es[node] = max([ef[pred] for pred in predecessors])
                 else:
                     es[node] = 0
                 
+                # Early Finish = Early Start + duration of longest outgoing activity
                 successors = list(graph.successors(node))
                 if successors:
-                    ef[node] = es[node] + max(durations.get((node, succ), 0) for succ in successors)
+                    max_duration = max([graph[node][succ]['duration'] for succ in successors])
+                    ef[node] = es[node] + max_duration
                 else:
-                    ef[node] = es[node]
-
-            # Project duration is the maximum EF
+                    ef[node] = es[node]  # End node
+            
+            # Project duration is the maximum EF of all nodes
             project_duration = max(ef.values()) if ef else 0
-
-            # Backward pass - calculate Late Start and Late Finish
+            
+            # Backward pass - calculate LS and LF
             for node in reversed(topo_order):
                 successors = list(graph.successors(node))
                 if successors:
-                    lf[node] = min(ls[succ] for succ in successors)
+                    # Late Finish = min of all successor Late Start times
+                    lf[node] = min([ls[succ] for succ in successors])
                 else:
-                    lf[node] = project_duration
+                    # End nodes: LF = EF (project duration)
+                    lf[node] = ef[node]
                 
-                predecessors = list(graph.predecessors(node))
-                if predecessors:
-                    incoming_durations = [durations.get((pred, node), 0) for pred in predecessors]
-                    ls[node] = lf[node] - max(incoming_durations) if incoming_durations else lf[node]
+                # Late Start = Late Finish - duration of longest outgoing activity
+                if successors:
+                    max_duration = max([graph[node][succ]['duration'] for succ in successors])
+                    ls[node] = lf[node] - max_duration
                 else:
-                    ls[node] = lf[node]
-
-            # Calculate floats and identify critical activities
-            critical_path = []
-            float_table = []
+                    ls[node] = lf[node]  # End node
+            
+            # Calculate activity-specific values and identify critical path
+            activity_analysis = []
+            critical_activities = []
+            critical_path_edges = []
             
             for u, v, data in graph.edges(data=True):
                 activity = data['activity']
                 duration = data['duration']
                 
-                es_u = es[u]
-                ef_u = es_u + duration
-                ls_u = ls[u]
-                lf_v = lf[v]
+                # Activity times
+                activity_es = es[u]
+                activity_ef = activity_es + duration
+                activity_lf = lf[v]
+                activity_ls = activity_lf - duration
                 
-                # Total float calculation
-                total_float = lf_v - ef_u
+                # Total Float = LS - ES or LF - EF
+                total_float = activity_ls - activity_es
                 
-                float_table.append({
+                activity_analysis.append({
                     'Activity': activity,
-                    'ES': es_u,
-                    'EF': ef_u,
-                    'LS': ls_u,
-                    'LF': lf_v,
+                    'Start_Node': u,
+                    'End_Node': v,
+                    'Duration': duration,
+                    'ES': activity_es,
+                    'EF': activity_ef,
+                    'LS': activity_ls,
+                    'LF': activity_lf,
                     'Float': total_float
                 })
                 
-                if total_float == 0:  # Critical activity
-                    critical_path.append((u, v))
-
+                # Critical activities have zero float
+                if abs(total_float) < 0.001:  # Use small epsilon for floating point comparison
+                    critical_activities.append(activity)
+                    critical_path_edges.append((u, v))
+            
             # Update session state
-            st.session_state.critical_path = critical_path
+            st.session_state.critical_path = critical_path_edges
             st.session_state.project_duration = project_duration
-            st.session_state.float_table = float_table
-
-            return True, f"Critical path computed successfully. Project duration: {project_duration} days"
+            st.session_state.analysis_results = {
+                'activities': activity_analysis,
+                'critical_activities': critical_activities,
+                'node_times': {'es': es, 'ef': ef, 'ls': ls, 'lf': lf}
+            }
+            
+            return True, f"Analysis complete! Project duration: {project_duration} days"
 
         except Exception as e:
-            return False, f"Error computing critical path: {str(e)}"
+            return False, f"Error in analysis: {str(e)}"
 
-    def draw_network_diagram(self, highlight_critical=True):
-        """Draw the network diagram using matplotlib"""
+    def calculate_hierarchical_layout(self):
+        """Calculate layout to minimize edge crossings using hierarchical positioning"""
+        if not st.session_state.activities:
+            return {}
+        
+        graph = st.session_state.graph
+        
+        # Try to use graphviz-style hierarchical layout if available
+        try:
+            pos = nx.nx_agraph.graphviz_layout(graph, prog='dot')
+            return pos
+        except:
+            pass
+        
+        # Fallback: Custom hierarchical layout
+        try:
+            # Group nodes by their topological level
+            topo_order = list(nx.topological_sort(graph))
+            levels = {}
+            node_levels = {}
+            
+            # Assign levels based on longest path from source
+            for node in topo_order:
+                if not list(graph.predecessors(node)):
+                    level = 0
+                else:
+                    level = max([node_levels[pred] for pred in graph.predecessors(node)]) + 1
+                
+                node_levels[node] = level
+                if level not in levels:
+                    levels[level] = []
+                levels[level].append(node)
+            
+            # Position nodes
+            pos = {}
+            level_width = 4.0
+            node_spacing = 2.0
+            
+            for level, nodes in levels.items():
+                x = level * level_width
+                num_nodes = len(nodes)
+                
+                if num_nodes == 1:
+                    pos[nodes[0]] = (x, 0)
+                else:
+                    start_y = -(num_nodes - 1) * node_spacing / 2
+                    for i, node in enumerate(nodes):
+                        y = start_y + i * node_spacing
+                        pos[node] = (x, y)
+            
+            return pos
+            
+        except:
+            # Final fallback: spring layout with parameters to reduce crossings
+            return nx.spring_layout(graph, seed=42, k=2.0, iterations=100)
+
+    def draw_network_diagram(self):
+        """Draw clean network diagram with proper layout"""
         if not st.session_state.activities:
             return None
 
-        fig, ax = plt.subplots(figsize=(12, 8))
-        fig.patch.set_facecolor('#f8f9fa')
-        ax.set_facecolor('#ffffff')
-
+        # Create figure with clean styling
+        fig, ax = plt.subplots(figsize=(14, 10))
+        fig.patch.set_facecolor('white')
+        ax.set_facecolor('white')
+        
         graph = st.session_state.graph
         
-        # Use spring layout for better visualization
-        pos = nx.spring_layout(graph, seed=42, k=1.5, iterations=50)
+        # Use hierarchical layout to minimize crossings
+        pos = self.calculate_hierarchical_layout()
         
-        # Color schemes
-        base_node_color = '#e6f3ff'
-        base_edge_color = '#a0aec0'
-        critical_node_color = '#ff6b6b'
-        critical_edge_color = '#ff3860'
+        # Define colors
+        regular_node_color = '#e3f2fd'
+        critical_node_color = '#ffebee'
+        node_border_color = '#1976d2'
+        critical_border_color = '#d32f2f'
+        regular_edge_color = '#90a4ae'
+        critical_edge_color = '#f44336'
         
-        # Get critical nodes
+        # Get critical elements
         critical_edges = set(st.session_state.critical_path)
         critical_nodes = set()
         for u, v in critical_edges:
-            critical_nodes.add(u)
-            critical_nodes.add(v)
+            critical_nodes.update([u, v])
         
-        # Draw all nodes
-        regular_nodes = [n for n in graph.nodes if n not in critical_nodes]
+        # Draw nodes with better styling
+        all_nodes = list(graph.nodes())
+        regular_nodes = [n for n in all_nodes if n not in critical_nodes]
         
+        # Regular nodes
         if regular_nodes:
             nx.draw_networkx_nodes(graph, pos, nodelist=regular_nodes,
-                                 ax=ax, node_color=base_node_color,
-                                 node_size=1500, edgecolors='#4a6baf', linewidths=2)
+                                 node_color=regular_node_color,
+                                 node_size=2000,
+                                 edgecolors=node_border_color,
+                                 linewidths=2.5,
+                                 ax=ax)
         
-        if critical_nodes and highlight_critical:
+        # Critical nodes
+        if critical_nodes:
             nx.draw_networkx_nodes(graph, pos, nodelist=list(critical_nodes),
-                                 ax=ax, node_color=critical_node_color,
-                                 node_size=1500, edgecolors='#d63384', linewidths=3)
+                                 node_color=critical_node_color,
+                                 node_size=2000,
+                                 edgecolors=critical_border_color,
+                                 linewidths=3,
+                                 ax=ax)
         
-        # Draw edges
-        regular_edges = [(u, v) for u, v in graph.edges if (u, v) not in critical_edges]
+        # Draw edges with better arrow styling
+        regular_edges = [(u, v) for u, v in graph.edges() if (u, v) not in critical_edges]
         
+        # Regular edges
         if regular_edges:
             nx.draw_networkx_edges(graph, pos, edgelist=regular_edges,
-                                 ax=ax, edge_color=base_edge_color,
-                                 width=2, arrows=True, arrowsize=20,
-                                 arrowstyle='-|>', node_size=1500)
+                                 edge_color=regular_edge_color,
+                                 width=2,
+                                 arrows=True,
+                                 arrowsize=25,
+                                 arrowstyle='-|>',
+                                 node_size=2000,
+                                 ax=ax,
+                                 connectionstyle="arc3,rad=0.1")
         
-        if critical_edges and highlight_critical:
+        # Critical edges
+        if critical_edges:
             nx.draw_networkx_edges(graph, pos, edgelist=list(critical_edges),
-                                 ax=ax, edge_color=critical_edge_color,
-                                 width=3, arrows=True, arrowsize=20,
-                                 arrowstyle='-|>', node_size=1500)
+                                 edge_color=critical_edge_color,
+                                 width=4,
+                                 arrows=True,
+                                 arrowsize=30,
+                                 arrowstyle='-|>',
+                                 node_size=2000,
+                                 ax=ax,
+                                 connectionstyle="arc3,rad=0.1")
         
-        # Draw node labels
-        nx.draw_networkx_labels(graph, pos, ax=ax, font_size=14,
-                              font_weight='bold', font_color='#2c3e50')
+        # Node labels
+        nx.draw_networkx_labels(graph, pos, 
+                              font_size=14, 
+                              font_weight='bold',
+                              font_family='Arial',
+                              ax=ax)
         
-        # Draw edge labels
+        # Edge labels with better positioning
         edge_labels = {}
         for u, v, data in graph.edges(data=True):
-            edge_labels[(u, v)] = f"{data['activity']}\n({data['duration']})"
+            edge_labels[(u, v)] = f"{data['activity']}\n({data['duration']}d)"
         
-        nx.draw_networkx_edge_labels(graph, pos, edge_labels=edge_labels,
-                                   ax=ax, font_size=10,
-                                   bbox=dict(boxstyle='round,pad=0.2',
+        nx.draw_networkx_edge_labels(graph, pos, edge_labels,
+                                   font_size=11,
+                                   font_weight='bold',
+                                   bbox=dict(boxstyle="round,pad=0.3",
                                            facecolor='white',
                                            edgecolor='gray',
-                                           alpha=0.8))
+                                           alpha=0.9),
+                                   ax=ax)
         
-        ax.set_title("Project Network Diagram", fontsize=16, fontweight='bold', pad=20)
+        # Clean up the plot
+        ax.set_title("Project Network Diagram", 
+                    fontsize=18, 
+                    fontweight='bold', 
+                    pad=30,
+                    color='#2c3e50')
         ax.axis('off')
         
         # Add legend
-        from matplotlib.patches import Patch
+        from matplotlib.lines import Line2D
         legend_elements = [
-            Patch(facecolor=base_node_color, edgecolor='#4a6baf', label='Regular Activity'),
-            Patch(facecolor=critical_node_color, edgecolor='#d63384', label='Critical Activity')
+            Line2D([0], [0], marker='o', color='w', 
+                   markerfacecolor=regular_node_color, 
+                   markeredgecolor=node_border_color,
+                   markersize=15, markeredgewidth=2,
+                   label='Regular Node'),
+            Line2D([0], [0], marker='o', color='w', 
+                   markerfacecolor=critical_node_color, 
+                   markeredgecolor=critical_border_color,
+                   markersize=15, markeredgewidth=3,
+                   label='Critical Node'),
+            Line2D([0], [0], color=regular_edge_color, 
+                   linewidth=2, label='Regular Activity'),
+            Line2D([0], [0], color=critical_edge_color, 
+                   linewidth=4, label='Critical Activity')
         ]
-        ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
+        
+        ax.legend(handles=legend_elements, 
+                 loc='upper right', 
+                 fontsize=12,
+                 frameon=True,
+                 fancybox=True,
+                 shadow=True)
         
         plt.tight_layout()
         return fig
 
     def add_dummy_data(self):
-        """Add sample data for demonstration"""
+        """Add sample project data"""
         if st.session_state.activities:
-            return False, "Clear existing data before loading sample data"
+            return False, "Clear existing data first"
         
+        # Sample project: Software Development
         dummy_activities = [
-            ("A", "1", "2", 4),
-            ("B", "1", "3", 3),
-            ("C", "2", "4", 2),
-            ("D", "3", "4", 5),
-            ("E", "4", "5", 1)
+            ("A", "1", "2", 3),  # Requirements
+            ("B", "1", "3", 4),  # Design
+            ("C", "2", "4", 2),  # Database Setup
+            ("D", "3", "4", 5),  # Development
+            ("E", "4", "5", 3),  # Testing
+            ("F", "5", "6", 1)   # Deployment
         ]
         
         for activity, start, end, duration in dummy_activities:
-            st.session_state.graph.add_edge(start, end, duration=duration, activity=activity)
+            st.session_state.graph.add_edge(start, end, 
+                                          duration=duration, 
+                                          activity=activity)
             st.session_state.activities.append((activity, start, end, duration))
         
-        return True, "Sample data loaded successfully"
+        return True, "Sample project loaded: Software Development"
 
 def main():
     app = NetworkDiagramApp()
     
-    # Header
+    # Clean header
     st.markdown("""
     <div class="main-header">
         <h1>📊 Network Diagram Simulator</h1>
@@ -334,24 +488,24 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Sidebar for input
+    # Sidebar for input - cleaner layout
     with st.sidebar:
-        st.header("📝 Add Activity")
+        st.markdown("### 📝 Add New Activity")
         
-        with st.form("activity_form"):
-            activity = st.text_input("Activity ID", placeholder="e.g., A, B, C")
-            start_node = st.text_input("Start Node", placeholder="e.g., 1, 2")
-            end_node = st.text_input("End Node", placeholder="e.g., 2, 3")
-            duration = st.number_input("Duration (days)", min_value=1, value=1)
+        with st.form("activity_form", clear_on_submit=True):
+            activity = st.text_input("Activity ID", placeholder="A", help="Unique identifier (A, B, C, etc.)")
             
             col1, col2 = st.columns(2)
             with col1:
-                submit_button = st.form_submit_button("➕ Add Activity", use_container_width=True)
+                start_node = st.text_input("Start", placeholder="1", help="Starting node")
             with col2:
-                dummy_button = st.form_submit_button("🎲 Load Sample", use_container_width=True)
+                end_node = st.text_input("End", placeholder="2", help="Ending node")
+            
+            duration = st.number_input("Duration (days)", min_value=1, value=1, help="Time to complete activity")
+            
+            submitted = st.form_submit_button("➕ Add Activity", type="primary", use_container_width=True)
         
-        # Handle form submissions
-        if submit_button:
+        if submitted:
             success, message = app.add_activity(activity, start_node, end_node, duration)
             if success:
                 st.success(message)
@@ -359,7 +513,12 @@ def main():
             else:
                 st.error(message)
         
-        if dummy_button:
+        st.markdown("---")
+        
+        # Action buttons - cleaner layout
+        st.markdown("### 🛠️ Actions")
+        
+        if st.button("🎲 Load Sample Data", use_container_width=True):
             success, message = app.add_dummy_data()
             if success:
                 st.success(message)
@@ -367,14 +526,17 @@ def main():
             else:
                 st.warning(message)
         
-        st.divider()
-        
-        # Action buttons
-        st.header("🛠️ Actions")
+        if st.button("🔍 Analyze Critical Path", use_container_width=True, type="primary"):
+            success, message = app.compute_critical_path()
+            if success:
+                st.success(message)
+                st.rerun()
+            else:
+                st.error(message)
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("↩️ Undo Last", use_container_width=True):
+            if st.button("↩️ Undo", use_container_width=True):
                 success, message = app.remove_last_activity()
                 if success:
                     st.success(message)
@@ -383,149 +545,127 @@ def main():
                     st.warning(message)
         
         with col2:
-            if st.button("🗑️ Clear All", use_container_width=True):
+            if st.button("🗑️ Clear", use_container_width=True):
                 success, message = app.clear_all_activities()
                 st.success(message)
                 st.rerun()
-        
-        if st.button("🔍 Compute Critical Path", use_container_width=True, type="primary"):
-            success, message = app.compute_critical_path()
-            if success:
-                st.success(message)
-                st.rerun()
-            else:
-                st.error(message)
 
-    # Main content area
-    if st.session_state.activities:
-        # Create activity dataframe
-        activity_df = pd.DataFrame(st.session_state.activities, 
-                                 columns=['Activity', 'Start Node', 'End Node', 'Duration'])
-        
-        # Add computed values if available
-        if st.session_state.float_table:
-            float_df = pd.DataFrame(st.session_state.float_table)
-            # Merge the dataframes
-            merged_df = activity_df.merge(float_df[['Activity', 'ES', 'EF', 'LS', 'LF', 'Float']], 
-                                        on='Activity', how='left')
-            display_df = merged_df
-        else:
-            # Add empty columns for ES, EF, LS, LF, Float
-            for col in ['ES', 'EF', 'LS', 'LF', 'Float']:
-                activity_df[col] = ''
-            display_df = activity_df
-        
-        # Display results
-        col1, col2 = st.columns([2, 1])
+    # Main content - cleaner layout
+    if not st.session_state.activities:
+        st.markdown("""
+        <div class="info-box">
+            <h3>🚀 Getting Started</h3>
+            <p><strong>Step 1:</strong> Add activities using the sidebar form</p>
+            <p><strong>Step 2:</strong> Click "Analyze Critical Path" to run CPM analysis</p>
+            <p><strong>Step 3:</strong> View results and network diagram</p>
+            <br>
+            <p>💡 <strong>Tip:</strong> Use "Load Sample Data" to see an example project</p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
+
+    # Results section - much cleaner
+    if st.session_state.analysis_results:
+        # Project metrics in a clean row
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.subheader("📋 Activity Table")
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.metric("Project Duration", f"{st.session_state.project_duration} days")
         
         with col2:
-            st.subheader("📊 Project Metrics")
-            
-            if st.session_state.project_duration > 0:
-                st.metric("Project Duration", f"{st.session_state.project_duration} days")
-                
-                # Critical path display
-                if st.session_state.critical_path:
-                    critical_activities = []
-                    for u, v in st.session_state.critical_path:
-                        for act, s, e, d in st.session_state.activities:
-                            if s == u and e == v:
-                                critical_activities.append(act)
-                                break
-                    
-                    st.markdown(f"""
-                    <div class="critical-path">
-                        🔑 Critical Path<br>
-                        {' → '.join(critical_activities)}
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # Float analysis
-                if st.session_state.float_table:
-                    critical_count = sum(1 for item in st.session_state.float_table if item['Float'] == 0)
-                    total_activities = len(st.session_state.float_table)
-                    
-                    st.metric("Critical Activities", f"{critical_count}/{total_activities}")
-                    
-                    avg_float = np.mean([item['Float'] for item in st.session_state.float_table])
-                    st.metric("Average Float", f"{avg_float:.1f} days")
-            else:
-                st.info("🔍 Click 'Compute Critical Path' to analyze the network")
+            critical_count = len(st.session_state.analysis_results.get('critical_activities', []))
+            total_count = len(st.session_state.activities)
+            st.metric("Critical Activities", f"{critical_count}/{total_count}")
         
-        # Display network diagram
-        st.subheader("🕸️ Network Diagram")
+        with col3:
+            if 'activities' in st.session_state.analysis_results:
+                avg_float = np.mean([act['Float'] for act in st.session_state.analysis_results['activities']])
+                st.metric("Average Float", f"{avg_float:.1f} days")
         
-        fig = app.draw_network_diagram(highlight_critical=st.session_state.project_duration > 0)
-        if fig:
-            st.pyplot(fig, use_container_width=True)
-            
-            # Download options
-            col1, col2 = st.columns(2)
-            with col1:
-                # Save plot as PNG
+        with col4:
+            st.metric("Total Activities", total_count)
+        
+        # Critical path display
+        if st.session_state.analysis_results.get('critical_activities'):
+            critical_path_str = " → ".join(st.session_state.analysis_results['critical_activities'])
+            st.markdown(f"""
+            <div class="critical-path-display">
+                🔑 Critical Path: {critical_path_str}
+            </div>
+            """, unsafe_allow_html=True)
+
+    # Network diagram
+    st.markdown("### 🕸️ Network Diagram")
+    fig = app.draw_network_diagram()
+    if fig:
+        st.pyplot(fig, use_container_width=True)
+        plt.close(fig)
+    
+    # Data table - only if analysis is done
+    if st.session_state.analysis_results:
+        st.markdown("### 📊 Activity Analysis")
+        
+        # Create clean dataframe
+        analysis_data = st.session_state.analysis_results['activities']
+        df = pd.DataFrame(analysis_data)
+        
+        # Reorder and rename columns for clarity
+        display_df = df[['Activity', 'Start_Node', 'End_Node', 'Duration', 'ES', 'EF', 'LS', 'LF', 'Float']].copy()
+        display_df.columns = ['Activity', 'Start', 'End', 'Duration', 'ES', 'EF', 'LS', 'LF', 'Float']
+        
+        # Highlight critical activities
+        def highlight_critical(row):
+            if row['Float'] == 0:
+                return ['background-color: #ffebee'] * len(row)
+            return [''] * len(row)
+        
+        styled_df = display_df.style.apply(highlight_critical, axis=1)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        
+        # Download options
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if fig:
                 img_buffer = io.BytesIO()
-                fig.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+                fig.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight', 
+                           facecolor='white', edgecolor='none')
                 img_buffer.seek(0)
                 
                 st.download_button(
-                    label="💾 Download Diagram (PNG)",
+                    label="💾 Download Diagram",
                     data=img_buffer.getvalue(),
                     file_name="network_diagram.png",
                     mime="image/png",
                     use_container_width=True
                 )
+        
+        with col2:
+            csv_buffer = io.StringIO()
+            display_df.to_csv(csv_buffer, index=False)
             
-            with col2:
-                # Export data as CSV
-                csv_buffer = io.StringIO()
-                display_df.to_csv(csv_buffer, index=False)
-                
-                st.download_button(
-                    label="📤 Export Data (CSV)",
-                    data=csv_buffer.getvalue(),
-                    file_name="project_activities.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-            
-            plt.close(fig)  # Clean up memory
+            st.download_button(
+                label="📤 Export Data",
+                data=csv_buffer.getvalue(),
+                file_name="project_analysis.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
     
     else:
-        st.info("👈 Add activities using the sidebar to get started, or load sample data to see a demonstration.")
-        
-        # Show some help text
-        with st.expander("ℹ️ How to use this application"):
-            st.markdown("""
-            **Step 1: Add Activities**
-            - Enter a unique Activity ID (e.g., A, B, C)
-            - Specify Start and End nodes (e.g., 1, 2, 3)
-            - Enter the duration in days
-            - Click "Add Activity"
-            
-            **Step 2: Build Your Network**
-            - Add multiple activities that connect to form a project network
-            - Activities should connect start-to-finish to show dependencies
-            
-            **Step 3: Analyze**
-            - Click "Compute Critical Path" to perform CPM analysis
-            - View the critical path, project duration, and activity floats
-            - The diagram will highlight critical activities in red
-            
-            **Tips:**
-            - Use "Load Sample" to see an example project
-            - Critical activities have zero float and determine project duration
-            - Non-critical activities have positive float (slack time)
-            """)
+        # Simple activity list before analysis
+        st.markdown("### 📋 Current Activities")
+        simple_df = pd.DataFrame(st.session_state.activities, 
+                               columns=['Activity', 'Start', 'End', 'Duration'])
+        st.dataframe(simple_df, use_container_width=True, hide_index=True)
 
-    # Footer
+    # Clean footer
     st.markdown("---")
     st.markdown(
-        "© Network Diagram Simulator | Web App Version | "
-        "Original by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy"
+        "<div style='text-align: center; color: #666; padding: 1rem;'>"
+        "Network Diagram Simulator | Web Application"
+        "</div>", 
+        unsafe_allow_html=True
     )
 
 if __name__ == "__main__":
