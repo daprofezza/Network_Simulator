@@ -76,6 +76,8 @@ class NetworkDiagramApp:
             st.session_state.graph = nx.DiGraph()
         if 'critical_path' not in st.session_state:
             st.session_state.critical_path = []
+        if 'critical_path_nodes' not in st.session_state:
+            st.session_state.critical_path_nodes = []
         if 'project_duration' not in st.session_state:
             st.session_state.project_duration = 0
         if 'analysis_results' not in st.session_state:
@@ -115,6 +117,7 @@ class NetworkDiagramApp:
             
             # Clear previous analysis
             st.session_state.critical_path = []
+            st.session_state.critical_path_nodes = []
             st.session_state.project_duration = 0
             st.session_state.analysis_results = {}
             
@@ -135,6 +138,7 @@ class NetworkDiagramApp:
             
             # Clear analysis
             st.session_state.critical_path = []
+            st.session_state.critical_path_nodes = []
             st.session_state.project_duration = 0
             st.session_state.analysis_results = {}
             
@@ -150,12 +154,54 @@ class NetworkDiagramApp:
         st.session_state.activities = []
         st.session_state.graph = nx.DiGraph()
         st.session_state.critical_path = []
+        st.session_state.critical_path_nodes = []
         st.session_state.project_duration = 0
         st.session_state.analysis_results = {}
         return True, "All activities cleared"
 
+    def find_critical_path_sequence(self, graph, critical_edges, start_nodes):
+        """Find the correct sequence of critical path from start to end"""
+        if not critical_edges:
+            return []
+        
+        # Build adjacency list for critical edges only
+        critical_graph = {}
+        for u, v in critical_edges:
+            if u not in critical_graph:
+                critical_graph[u] = []
+            critical_graph[u].append(v)
+        
+        # Find the longest path through critical activities
+        def dfs_longest_path(node, visited, path):
+            if node in visited:
+                return path
+            
+            visited.add(node)
+            current_path = path + [node]
+            
+            if node not in critical_graph:
+                return current_path
+            
+            longest = current_path
+            for neighbor in critical_graph[node]:
+                candidate_path = dfs_longest_path(neighbor, visited.copy(), current_path)
+                if len(candidate_path) > len(longest):
+                    longest = candidate_path
+            
+            return longest
+        
+        # Try from each start node and find the longest path
+        longest_critical_path = []
+        for start in start_nodes:
+            if start in critical_graph or any(start == u for u, v in critical_edges):
+                path = dfs_longest_path(start, set(), [])
+                if len(path) > len(longest_critical_path):
+                    longest_critical_path = path
+        
+        return longest_critical_path
+
     def compute_critical_path(self):
-        """Fixed critical path computation using CPM algorithm"""
+        """Fixed critical path computation using proper CPM algorithm"""
         try:
             if not st.session_state.activities:
                 return False, "No activities to analyze"
@@ -168,55 +214,75 @@ class NetworkDiagramApp:
             
             # Get all nodes and sort topologically
             nodes = list(graph.nodes())
+            if not nodes:
+                return False, "No nodes in the network"
+            
             topo_order = list(nx.topological_sort(graph))
             
-            # Initialize dictionaries
+            # Find start and end nodes
+            start_nodes = [n for n in nodes if graph.in_degree(n) == 0]
+            end_nodes = [n for n in nodes if graph.out_degree(n) == 0]
+            
+            if not start_nodes or not end_nodes:
+                return False, "Network must have clear start and end nodes"
+            
+            # Initialize time dictionaries
             es = {node: 0 for node in nodes}  # Early Start
             ef = {node: 0 for node in nodes}  # Early Finish
-            ls = {node: 0 for node in nodes}  # Late Start
-            lf = {node: 0 for node in nodes}  # Late Finish
+            ls = {node: float('inf') for node in nodes}  # Late Start
+            lf = {node: float('inf') for node in nodes}  # Late Finish
             
             # Forward pass - calculate ES and EF
             for node in topo_order:
-                # Early Start = max of all predecessor Early Finish times
-                predecessors = list(graph.predecessors(node))
-                if predecessors:
-                    es[node] = max([ef[pred] for pred in predecessors])
-                else:
+                if node in start_nodes:
                     es[node] = 0
-                
-                # Early Finish = Early Start + duration of longest outgoing activity
-                successors = list(graph.successors(node))
-                if successors:
-                    max_duration = max([graph[node][succ]['duration'] for succ in successors])
-                    ef[node] = es[node] + max_duration
                 else:
+                    # ES = max(EF of all predecessors)
+                    max_ef = 0
+                    for pred in graph.predecessors(node):
+                        pred_ef = ef[pred]
+                        max_ef = max(max_ef, pred_ef)
+                    es[node] = max_ef
+                
+                # EF = ES + duration of outgoing activities (max if multiple)
+                if graph.out_degree(node) == 0:
                     ef[node] = es[node]  # End node
+                else:
+                    max_duration = 0
+                    for succ in graph.successors(node):
+                        duration = graph[node][succ]['duration']
+                        max_duration = max(max_duration, duration)
+                    ef[node] = es[node] + max_duration
             
-            # Project duration is the maximum EF of all nodes
-            project_duration = max(ef.values()) if ef else 0
+            # Project duration is the maximum EF of end nodes
+            project_duration = max([ef[node] for node in end_nodes])
             
-            # Backward pass - calculate LS and LF
+            # Backward pass - calculate LF and LS
             for node in reversed(topo_order):
-                successors = list(graph.successors(node))
-                if successors:
-                    # Late Finish = min of all successor Late Start times
-                    lf[node] = min([ls[succ] for succ in successors])
-                else:
-                    # End nodes: LF = EF (project duration)
+                if node in end_nodes:
                     lf[node] = ef[node]
-                
-                # Late Start = Late Finish - duration of longest outgoing activity
-                if successors:
-                    max_duration = max([graph[node][succ]['duration'] for succ in successors])
-                    ls[node] = lf[node] - max_duration
                 else:
+                    # LF = min(LS of all successors)
+                    min_ls = float('inf')
+                    for succ in graph.successors(node):
+                        succ_ls = ls[succ]
+                        min_ls = min(min_ls, succ_ls)
+                    lf[node] = min_ls
+                
+                # LS = LF - duration of outgoing activities (max if multiple)
+                if graph.out_degree(node) == 0:
                     ls[node] = lf[node]  # End node
+                else:
+                    max_duration = 0
+                    for succ in graph.successors(node):
+                        duration = graph[node][succ]['duration']
+                        max_duration = max(max_duration, duration)
+                    ls[node] = lf[node] - max_duration
             
-            # Calculate activity-specific values and identify critical path
+            # Calculate activity-specific values and identify critical activities
             activity_analysis = []
             critical_activities = []
-            critical_path_edges = []
+            critical_edges = []
             
             for u, v, data in graph.edges(data=True):
                 activity = data['activity']
@@ -225,10 +291,10 @@ class NetworkDiagramApp:
                 # Activity times
                 activity_es = es[u]
                 activity_ef = activity_es + duration
-                activity_lf = lf[v]
-                activity_ls = activity_lf - duration
+                activity_ls = ls[v] - duration
+                activity_lf = ls[v]
                 
-                # Total Float = LS - ES or LF - EF
+                # Total Float = LS - ES = LF - EF
                 total_float = activity_ls - activity_es
                 
                 activity_analysis.append({
@@ -240,21 +306,27 @@ class NetworkDiagramApp:
                     'EF': activity_ef,
                     'LS': activity_ls,
                     'LF': activity_lf,
-                    'Float': total_float
+                    'Float': round(total_float, 2)
                 })
                 
-                # Critical activities have zero float
-                if abs(total_float) < 0.001:  # Use small epsilon for floating point comparison
+                # Critical activities have zero or near-zero float
+                if abs(total_float) < 0.001:
                     critical_activities.append(activity)
-                    critical_path_edges.append((u, v))
+                    critical_edges.append((u, v))
+            
+            # Find the proper critical path sequence
+            critical_path_nodes = self.find_critical_path_sequence(graph, critical_edges, start_nodes)
             
             # Update session state
-            st.session_state.critical_path = critical_path_edges
+            st.session_state.critical_path = critical_edges
+            st.session_state.critical_path_nodes = critical_path_nodes
             st.session_state.project_duration = project_duration
             st.session_state.analysis_results = {
                 'activities': activity_analysis,
                 'critical_activities': critical_activities,
-                'node_times': {'es': es, 'ef': ef, 'ls': ls, 'lf': lf}
+                'node_times': {'es': es, 'ef': ef, 'ls': ls, 'lf': lf},
+                'start_nodes': start_nodes,
+                'end_nodes': end_nodes
             }
             
             return True, f"Analysis complete! Project duration: {project_duration} days"
@@ -343,9 +415,7 @@ class NetworkDiagramApp:
         
         # Get critical elements
         critical_edges = set(st.session_state.critical_path)
-        critical_nodes = set()
-        for u, v in critical_edges:
-            critical_nodes.update([u, v])
+        critical_nodes = set(st.session_state.critical_path_nodes)
         
         # Draw nodes with better styling
         all_nodes = list(graph.nodes())
@@ -461,8 +531,8 @@ class NetworkDiagramApp:
         
         # Sample project: Software Development
         dummy_activities = [
-            ("A", "1", "2", 3),  # Requirements
-            ("B", "1", "3", 4),  # Design
+            ("A", "1", "2", 3),  # Requirements Analysis
+            ("B", "1", "3", 4),  # System Design
             ("C", "2", "4", 2),  # Database Setup
             ("D", "3", "4", 5),  # Development
             ("E", "4", "5", 3),  # Testing
@@ -585,12 +655,16 @@ def main():
         with col4:
             st.metric("Total Activities", total_count)
         
-        # Critical path display
-        if st.session_state.analysis_results.get('critical_activities'):
-            critical_path_str = " → ".join(st.session_state.analysis_results['critical_activities'])
+        # Critical path display - show node sequence
+        if st.session_state.critical_path_nodes:
+            # Show both node sequence and activity sequence
+            node_path_str = " → ".join(str(node) for node in st.session_state.critical_path_nodes)
+            activity_path_str = " → ".join(st.session_state.analysis_results['critical_activities'])
+            
             st.markdown(f"""
             <div class="critical-path-display">
-                🔑 Critical Path: {critical_path_str}
+                🔑 Critical Path (Nodes): {node_path_str}<br>
+                🔑 Critical Path (Activities): {activity_path_str}
             </div>
             """, unsafe_allow_html=True)
 
@@ -659,11 +733,11 @@ def main():
                                columns=['Activity', 'Start', 'End', 'Duration'])
         st.dataframe(simple_df, use_container_width=True, hide_index=True)
 
-    # Clean footer
+    # Updated footer with requested watermark
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: #666; padding: 1rem;'>"
-        "Network Diagram Simulator | Web Application"
+        "Network Diagram Simulator | Web Application | Developed by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy"
         "</div>", 
         unsafe_allow_html=True
     )
