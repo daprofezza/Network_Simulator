@@ -705,7 +705,7 @@ def main():
     )
 
 if __name__ == "__main__":
-    main()import streamlit as st
+    main()
 import networkx as nx
 import matplotlib.pyplot as plt
 import pandas as pd
