@@ -133,110 +133,82 @@ class NetworkDiagramApp:
         if not st.session_state.activities:
             return False, "No activities to remove"
         
-        try:
-            last_activity = st.session_state.activities.pop()
-            activity, start, end, duration = last_activity
-            st.session_state.graph.remove_edge(start, end)
-            
-            st.session_state.critical_path = []
-            st.session_state.critical_path_nodes = []
-            st.session_state.project_duration = 0
-            st.session_state.analysis_results = {}
-            
-            return True, f"Activity '{activity}' removed"
-        except Exception as e:
-            if 'last_activity' in locals():
-                st.session_state.activities.append(last_activity)
-            return False, f"Error removing activity: {str(e)}"
-
-    def clear_all_activities(self):
-        """Clear all activities and reset"""
-        st.session_state.activities = []
-        st.session_state.graph = nx.DiGraph()
-        st.session_state.critical_path = []
-        st.session_state.critical_path_nodes = []
-        st.session_state.project_duration = 0
-        st.session_state.analysis_results = {}
-        return True, "All activities cleared"
-
-    def find_critical_path_sequence(self, graph, critical_edges, start_nodes):
-        """Find the correct sequence of critical path from start to end"""
-        if not critical_edges:
-            return []
+        def find_critical_path_sequence(self, graph, critical_edges, start_nodes):
+    """Find the correct sequence of critical path from start to end"""
+    if not critical_edges:
+        return []
+    
+    # Build critical path graph
+    critical_graph = nx.DiGraph()
+    for u, v in critical_edges:
+        critical_graph.add_edge(u, v)
+    
+    # Find the longest path in the critical graph
+    try:
+        # Get all simple paths from start nodes to end nodes in critical graph
+        critical_start_nodes = [n for n in critical_graph.nodes() if critical_graph.in_degree(n) == 0]
+        critical_end_nodes = [n for n in critical_graph.nodes() if critical_graph.out_degree(n) == 0]
         
-        critical_graph = {}
-        for u, v in critical_edges:
-            if u not in critical_graph:
-                critical_graph[u] = []
-            critical_graph[u].append(v)
+        if not critical_start_nodes:
+            critical_start_nodes = [n for n in start_nodes if n in critical_graph.nodes()]
         
-        def dfs_longest_path(node, visited, path):
-            if node in visited:
-                return path
-            
-            visited.add(node)
-            current_path = path + [node]
-            
-            if node not in critical_graph:
-                return current_path
-            
-            longest = current_path
-            for neighbor in critical_graph[node]:
-                candidate_path = dfs_longest_path(neighbor, visited.copy(), current_path)
-                if len(candidate_path) > len(longest):
-                    longest = candidate_path
-            
-            return longest
+        longest_path = []
+        max_length = 0
         
-        longest_critical_path = []
-        for start in start_nodes:
-            if start in critical_graph or any(start == u for u, v in critical_edges):
-                path = dfs_longest_path(start, set(), [])
-                if len(path) > len(longest_critical_path):
-                    longest_critical_path = path
+        for start in critical_start_nodes:
+            for end in critical_end_nodes:
+                try:
+                    paths = list(nx.all_simple_paths(critical_graph, start, end))
+                    for path in paths:
+                        if len(path) > max_length:
+                            max_length = len(path)
+                            longest_path = path
+                except:
+                    continue
         
-        return longest_critical_path
-
-    def compute_critical_path(self):
-        """Fixed critical path computation using proper CPM algorithm"""
-        try:
-            if not st.session_state.activities:
-                return False, "No activities to analyze"
-
-            graph = st.session_state.graph
-            
-            if not nx.is_directed_acyclic_graph(graph):
-                return False, "Network contains cycles - invalid for CPM analysis"
-            
-            nodes = list(graph.nodes())
-            if not nodes:
-                return False, "No nodes in the network"
-            
-            topo_order = list(nx.topological_sort(graph))
-            
-            start_nodes = [n for n in nodes if graph.in_degree(n) == 0]
-            end_nodes = [n for n in nodes if graph.out_degree(n) == 0]
-            
-            if not start_nodes or not end_nodes:
-                return False, "Network must have clear start and end nodes"
-            
-            es = {node: 0 for node in nodes}
-            ef = {node: 0 for node in nodes}
-            ls = {node: float('inf') for node in nodes}
-            lf = {node: float('inf') for node in nodes}
-            
-            for node in topo_order:
-                if node in start_nodes:
-                    es[node] = 0
-                else:
-                    max_ef = 0
-                    for pred in graph.predecessors(node):
-                        pred_ef = ef[pred]
-                        max_ef = max(max_ef, pred_ef)
-                    es[node] = max_ef
+        # If no path found, try topological sort of critical graph
+        if not longest_path:
+            try:
+                longest_path = list(nx.topological_sort(critical_graph))
+            except:
+                longest_path = list(critical_graph.nodes())
+        
+        return longest_path
+        
+    except Exception as e:
+        # Fallback: return nodes in the order they appear in critical edges
+        nodes_in_order = []
+        remaining_edges = critical_edges.copy()
+        
+        # Start with a start node
+        current_nodes = [n for n in start_nodes if any(n == u for u, v in critical_edges)]
+        if not current_nodes and critical_edges:
+            current_nodes = [critical_edges[0][0]]
+        
+        visited = set()
+        
+        while current_nodes and remaining_edges:
+            current = current_nodes.pop(0)
+            if current in visited:
+                continue
                 
-                if graph.out_degree(node) == 0:
-                    ef[node] = es[node]
+            visited.add(current)
+            nodes_in_order.append(current)
+            
+            # Find next nodes
+            next_nodes = []
+            edges_to_remove = []
+            for u, v in remaining_edges:
+                if u == current:
+                    next_nodes.append(v)
+                    edges_to_remove.append((u, v))
+            
+            for edge in edges_to_remove:
+                remaining_edges.remove(edge)
+            
+            current_nodes.extend(next_nodes)
+        
+        return nodes_in_order
                 else:
                     max_duration = 0
                     for succ in graph.successors(node):
