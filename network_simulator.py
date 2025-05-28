@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Clean CSS styling
+# CSS Styling
 st.markdown("""
 <style>
     @keyframes pulse {
@@ -147,116 +147,113 @@ class NetworkDiagramApp:
         st.session_state.analysis_results = {}
         return True, "All activities cleared"
 
-    def find_critical_path_sequence(self, graph, topo_order, es):
-        """Find correct critical path using longest path algorithm via topological order"""
-        dist = {node: -float('inf') for node in topo_order}
-        prev = {node: None for node in topo_order}
-        start_nodes = [n for n in topo_order if graph.in_degree(n) == 0]
+    def compute_critical_path(self):
+        """Compute the correct critical path using CPM algorithm"""
+        if not st.session_state.activities:
+            return False, "No activities to analyze"
+        graph = st.session_state.graph
+        if not nx.is_directed_acyclic_graph(graph):
+            return False, "Cycle detected — invalid for CPM analysis"
+
+        topo_order = list(nx.topological_sort(graph))
+
+        es = {node: 0 for node in graph.nodes}
+        ef = {node: 0 for node in graph.nodes}
+        ls = {node: float('inf') for node in graph.nodes}
+        lf = {node: float('inf') for node in graph.nodes}
+
+        # Forward pass
+        for node in topo_order:
+            for pred in graph.predecessors(node):
+                edge_duration = graph[pred][node]['duration']
+                ef_pred = es[pred] + edge_duration
+                if ef_pred > ef[node]:
+                    ef[node] = ef_pred
+            es[node] = ef[node]
+
+        project_duration = max(ef.values())
+
+        # Backward pass
+        for node in reversed(topo_order):
+            if graph.out_degree(node) == 0:
+                lf[node] = project_duration
+            else:
+                min_ls_succ = min(ls[succ] for succ in graph.successors(node))
+                lf[node] = min_ls_succ
+            for pred in graph.predecessors(node):
+                edge_duration = graph[pred][node]['duration']
+                ls_pred = lf[node] - edge_duration
+                if ls_pred < ls[pred]:
+                    ls[pred] = ls_pred
+
+        # Activity float calculation
+        activity_analysis = []
+        critical_activities = []
+        critical_edges = []
+
+        for u, v, data in graph.edges(data=True):
+            act = data['activity']
+            dur = data['duration']
+            es_act = es[u]
+            ef_act = ef[v]
+            lf_act = lf[v]
+            ls_act = lf_act - dur
+            tf = ls_act - es_act
+
+            activity_analysis.append({
+                'Activity': act,
+                'Start_Node': u,
+                'End_Node': v,
+                'Duration': dur,
+                'ES': es_act,
+                'EF': ef_act,
+                'LS': ls_act,
+                'LF': lf_act,
+                'Float': round(tf, 2)
+            })
+
+            if abs(tf) < 1e-6:
+                critical_activities.append(act)
+                critical_edges.append((u, v))
+
+        # Reconstruct critical path using topological sort and longest weighted path
+        dist = {n: -float('inf') for n in graph}
+        prev = {n: None for n in graph}
+        sources = [n for n in graph if graph.in_degree(n) == 0]
+
+        for source in sources:
+            dist[source] = 0
 
         for node in topo_order:
-            if node in start_nodes:
-                dist[node] = 0
-            else:
-                for pred in graph.predecessors(node):
-                    edge_duration = graph[pred][node]['duration']
-                    if dist[pred] + edge_duration > dist[node]:
-                        dist[node] = dist[pred] + edge_duration
-                        prev[node] = pred
+            for succ in graph.successors(node):
+                weight = graph[node][succ]['duration']
+                if dist[node] + weight > dist[succ]:
+                    dist[succ] = dist[node] + weight
+                    prev[succ] = node
 
-        end_nodes = [n for n in topo_order if graph.out_degree(n) == 0]
-        max_dist = max(dist[n] for n in end_nodes)
-        critical_end = next(n for n in end_nodes if dist[n] == max_dist)
+        sinks = [n for n in graph if graph.out_degree(n) == 0]
+        max_dist = max(dist[n] for n in sinks)
+        sink_with_max = next(n for n in sinks if dist[n] == max_dist)
 
-        # Reconstruct path
         path = []
-        curr = critical_end
+        curr = sink_with_max
         while curr is not None:
             path.append(curr)
             curr = prev[curr]
-        return list(reversed(path))
+        critical_path_nodes = list(reversed(path))
 
-    def compute_critical_path(self):
-        """Fixed critical path computation using proper CPM algorithm"""
-        try:
-            if not st.session_state.activities:
-                return False, "No activities to analyze"
-            graph = st.session_state.graph
-            if not nx.is_directed_acyclic_graph(graph):
-                return False, "Network contains cycles - invalid for CPM analysis"
-            nodes = list(graph.nodes())
-            if not nodes:
-                return False, "No nodes in the network"
-            topo_order = list(nx.topological_sort(graph))
-            start_nodes = [n for n in nodes if graph.in_degree(n) == 0]
-            end_nodes = [n for n in nodes if graph.out_degree(n) == 0]
-            if not start_nodes or not end_nodes:
-                return False, "Network must have clear start and end nodes"
+        st.session_state.critical_path = critical_edges
+        st.session_state.critical_path_nodes = critical_path_nodes
+        st.session_state.project_duration = project_duration
+        st.session_state.analysis_results = {
+            'activities': activity_analysis,
+            'critical_activities': critical_activities,
+            'node_times': {'es': es, 'ef': ef, 'ls': ls, 'lf': lf},
+            'start_nodes': sources,
+            'end_nodes': sinks
+        }
 
-            es = {node: 0 for node in nodes}
-            ef = {node: 0 for node in nodes}
-            ls = {node: float('inf') for node in nodes}
-            lf = {node: float('inf') for node in nodes}
-
-            for node in topo_order:
-                if graph.in_degree(node) == 0:
-                    es[node] = 0
-                else:
-                    es[node] = max(ef[pred] for pred in graph.predecessors(node))
-                ef[node] = es[node] + max((graph[node][succ]['duration'] for succ in graph.successors(node)), default=0)
-
-            project_duration = max(ef[end] for end in end_nodes)
-
-            for node in reversed(topo_order):
-                if graph.out_degree(node) == 0:
-                    lf[node] = ef[node]
-                else:
-                    lf[node] = min(ls[succ] for succ in graph.successors(node))
-                ls[node] = lf[node] - max((graph[node][succ]['duration'] for succ in graph.successors(node)), default=0)
-
-            activity_analysis = []
-            critical_activities = []
-            critical_edges = []
-
-            for u, v, data in graph.edges(data=True):
-                activity = data['activity']
-                duration = data['duration']
-                activity_es = es[u]
-                activity_ef = activity_es + duration
-                activity_ls = ls[v] - duration
-                activity_lf = ls[v]
-                total_float = activity_ls - activity_es
-                activity_analysis.append({
-                    'Activity': activity,
-                    'Start_Node': u,
-                    'End_Node': v,
-                    'Duration': duration,
-                    'ES': activity_es,
-                    'EF': activity_ef,
-                    'LS': activity_ls,
-                    'LF': activity_lf,
-                    'Float': round(total_float, 2)
-                })
-                if abs(total_float) < 0.001:
-                    critical_activities.append(activity)
-                    critical_edges.append((u, v))
-
-            # Find critical path using corrected method
-            critical_path_nodes = self.find_critical_path_sequence(graph, topo_order, es)
-
-            st.session_state.critical_path = critical_edges
-            st.session_state.critical_path_nodes = critical_path_nodes
-            st.session_state.project_duration = project_duration
-            st.session_state.analysis_results = {
-                'activities': activity_analysis,
-                'critical_activities': critical_activities,
-                'node_times': {'es': es, 'ef': ef, 'ls': ls, 'lf': lf},
-                'start_nodes': start_nodes,
-                'end_nodes': end_nodes
-            }
-
-            return True, f"Analysis complete! Project duration: {project_duration} days"
-        except Exception as e:
-            return False, f"Error in analysis: {str(e)}"
+        return True, f"Analysis complete! Project duration: {project_duration} days"
 
     def calculate_hierarchical_layout(self):
         """Calculate layout to minimize edge crossings using hierarchical positioning"""
@@ -398,15 +395,15 @@ class NetworkDiagramApp:
             color = 'darkred' if node in critical_nodes else 'darkgreen'
             weight = 'bold' if node in critical_nodes else 'normal'
             ax.text(x, y, label,
-                    horizontalalignment='center',
-                    verticalalignment='center',
-                    fontsize=12,
-                    fontweight=weight,
-                    color=color,
-                    bbox=dict(boxstyle="round,pad=0.1",
-                              facecolor='white',
-                              edgecolor='none',
-                              alpha=0.8))
+                   horizontalalignment='center',
+                   verticalalignment='center',
+                   fontsize=12,
+                   fontweight=weight,
+                   color=color,
+                   bbox=dict(boxstyle="round,pad=0.1",
+                           facecolor='white',
+                           edgecolor='none',
+                           alpha=0.8))
 
         edge_labels = {}
         for u, v, data in graph.edges(data=True):
@@ -428,16 +425,16 @@ class NetworkDiagramApp:
             text_color = '#b71c1c' if is_critical else '#37474f'
             font_weight = 'bold' if is_critical else 'normal'
             ax.text(x, y, label,
-                    horizontalalignment='center',
-                    verticalalignment='center',
-                    fontsize=11,
-                    fontweight=font_weight,
-                    color=text_color,
-                    bbox=dict(boxstyle="round,pad=0.4",
-                              facecolor=bbox_color,
-                              edgecolor='gray' if not is_critical else '#f44336',
-                              alpha=0.95,
-                              linewidth=2 if is_critical else 1))
+                   horizontalalignment='center',
+                   verticalalignment='center',
+                   fontsize=11,
+                   fontweight=font_weight,
+                   color=text_color,
+                   bbox=dict(boxstyle="round,pad=0.4",
+                           facecolor=bbox_color,
+                           edgecolor='gray' if not is_critical else '#f44336',
+                           alpha=0.95,
+                           linewidth=2 if is_critical else 1))
 
         ax.set_title("Project Network Diagram with Critical Path Analysis",
                      fontsize=20,
