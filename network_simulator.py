@@ -699,7 +699,7 @@ def main():
     st.markdown(
         "<div style='text-align: center; color: #666; padding: 2rem 1rem; font-size: 0.9em;'>"
         "Network Diagram Simulator | Web Application <br>"
-        "Developed by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy"
+        "Developed with ♡ by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy"
         "</div>",
         unsafe_allow_html=True
     )
