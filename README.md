@@ -1,4 +1,4 @@
-📡 Project Network Simulator
+📡
 Project Network Simulator is a Python-based simulation tool designed to model, analyze, and visualize networks within the context of Operations Research (OR). It provides a powerful and intuitive framework for simulating project networks, critical paths, time-cost trade-offs, and other network-based decision-making scenarios often encountered in project management and systems engineering.
 
 🎯 Purpose
