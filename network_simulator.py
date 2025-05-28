@@ -164,46 +164,56 @@ class NetworkDiagramApp:
             if not start_nodes or not end_nodes:
                 return False, "Network must have clear start and end nodes"
 
+            # Forward pass to calculate earliest start and finish times
             es = {node: 0 for node in nodes}
             ef = {node: 0 for node in nodes}
-
-            # Forward Pass
+            
             for node in topo_order:
                 max_ef = 0
                 for pred in graph.predecessors(node):
                     edge_duration = graph[pred][node]['duration']
                     max_ef = max(max_ef, ef[pred])
                 es[node] = max_ef
-                ef[node] = max_ef + sum(graph[node][succ]['duration'] for succ in graph.successors(node))
+                # For nodes, the earliest finish is the max of predecessor's EF plus current node's duration
+                # For activities (edges), duration is already stored
+                if graph.out_degree(node) > 0:
+                    ef[node] = max_ef + max(graph[node][succ]['duration'] for succ in graph.successors(node))
+                else:
+                    ef[node] = max_ef
 
-            project_duration = max(ef[end] for end in end_nodes)
+            project_duration = max(ef[node] for node in end_nodes)
 
-            ls = {node: float('inf') for node in nodes}
-            lf = {node: float('inf') for node in nodes}
-
-            # Backward Pass
+            # Backward pass to calculate latest start and finish times
+            lf = {node: project_duration for node in nodes}
+            ls = {node: project_duration for node in nodes}
+            
             for node in reversed(topo_order):
                 if node in end_nodes:
-                    lf[node] = ef[node]
+                    lf[node] = project_duration
                 else:
                     min_ls = float('inf')
                     for succ in graph.successors(node):
                         min_ls = min(min_ls, ls[succ])
                     lf[node] = min_ls
-                ls[node] = lf[node] - sum(graph[node][succ]['duration'] for succ in graph.successors(node))
+                if graph.out_degree(node) > 0:
+                    ls[node] = lf[node] - max(graph[node][succ]['duration'] for succ in graph.successors(node))
+                else:
+                    ls[node] = lf[node]
 
+            # Calculate activity floats and identify critical activities
             activity_analysis = []
             critical_activities = []
             critical_edges = []
-
+            
             for u, v, data in graph.edges(data=True):
                 activity = data['activity']
                 duration = data['duration']
                 activity_es = es[u]
-                activity_ef = ef[v]
-                activity_ls = ls[v] - duration
-                activity_lf = ls[v]
+                activity_ef = activity_es + duration
+                activity_lf = lf[v]
+                activity_ls = activity_lf - duration
                 total_float = activity_ls - activity_es
+                
                 activity_analysis.append({
                     'Activity': activity,
                     'Start_Node': u,
@@ -215,35 +225,28 @@ class NetworkDiagramApp:
                     'LF': activity_lf,
                     'Float': round(total_float, 2)
                 })
+                
                 if abs(total_float) < 0.001:
                     critical_activities.append(activity)
                     critical_edges.append((u, v))
 
-            # Find correct critical path using longest weighted path
-            dist = {n: -float('inf') for n in graph}
-            prev = {n: None for n in graph}
-            sources = [n for n in graph if graph.in_degree(n) == 0]
-
-            for source in sources:
-                dist[source] = 0
-
-            for node in topo_order:
-                for succ in graph.successors(node):
-                    weight = graph[node][succ]['duration']
-                    if dist[node] + weight > dist[succ]:
-                        dist[succ] = dist[node] + weight
-                        prev[succ] = node
-
-            sinks = [n for n in graph if graph.out_degree(n) == 0]
-            max_dist = max(dist[n] for n in sinks)
-            sink_with_max = next(n for n in sinks if dist[n] == max_dist)
-
-            path = []
-            curr = sink_with_max
-            while curr is not None:
-                path.append(curr)
-                curr = prev[curr]
-            critical_path_nodes = list(reversed(path))
+            # Find the critical path through the network
+            critical_path_nodes = []
+            if critical_edges:
+                # Reconstruct the critical path from critical edges
+                critical_graph = nx.DiGraph()
+                for u, v in critical_edges:
+                    critical_graph.add_edge(u, v)
+                
+                # Find all paths in the critical subgraph
+                for start in start_nodes:
+                    for end in end_nodes:
+                        if nx.has_path(critical_graph, start, end):
+                            path = nx.shortest_path(critical_graph, start, end)
+                            critical_path_nodes = path
+                            break
+                    if critical_path_nodes:
+                        break
 
             st.session_state.critical_path = critical_edges
             st.session_state.critical_path_nodes = critical_path_nodes
@@ -318,71 +321,79 @@ class NetworkDiagramApp:
         critical_edge_color = '#e53935'
         critical_path_highlight = '#ff1744'
 
-        critical_edges = set(st.session_state.critical_path)
-        critical_nodes = set(st.session_state.critical_path_nodes)
+        critical_edges = set(st.session_state.critical_path) if st.session_state.critical_path else set()
+        critical_nodes = set(st.session_state.critical_path_nodes) if st.session_state.critical_path_nodes else set()
 
         all_nodes = list(graph.nodes())
         regular_nodes = [n for n in all_nodes if n not in critical_nodes]
 
+        # Draw regular nodes first
         if regular_nodes:
             nx.draw_networkx_nodes(graph, pos, nodelist=regular_nodes,
-                                   node_color=regular_node_color,
-                                   node_size=3500,
-                                   edgecolors=node_border_color,
-                                   linewidths=3,
-                                   ax=ax,
-                                   alpha=0.9)
+                                 node_color=regular_node_color,
+                                 node_size=3500,
+                                 edgecolors=node_border_color,
+                                 linewidths=3,
+                                 ax=ax,
+                                 alpha=0.9)
 
+        # Draw critical nodes with highlight
         if critical_nodes:
             nx.draw_networkx_nodes(graph, pos, nodelist=list(critical_nodes),
-                                   node_color=critical_node_color,
-                                   node_size=3500,
-                                   edgecolors=critical_border_color,
-                                   linewidths=4,
-                                   ax=ax,
-                                   alpha=0.95)
+                                 node_color=critical_node_color,
+                                 node_size=3500,
+                                 edgecolors=critical_border_color,
+                                 linewidths=4,
+                                 ax=ax,
+                                 alpha=0.95)
+            # Add glow effect for critical nodes
             nx.draw_networkx_nodes(graph, pos, nodelist=list(critical_nodes),
-                                   node_color=critical_path_highlight,
-                                   node_size=4000,
-                                   edgecolors='none',
-                                   ax=ax,
-                                   alpha=0.2)
+                                 node_color=critical_path_highlight,
+                                 node_size=4000,
+                                 edgecolors='none',
+                                 ax=ax,
+                                 alpha=0.2)
 
+        # Draw regular edges
         regular_edges = [(u, v) for u, v in graph.edges() if (u, v) not in critical_edges]
         if regular_edges:
             nx.draw_networkx_edges(graph, pos, edgelist=regular_edges,
-                                   edge_color=regular_edge_color,
-                                   width=2.5,
-                                   arrows=True,
-                                   arrowsize=30,
-                                   arrowstyle='-|>',
-                                   node_size=3500,
-                                   ax=ax,
-                                   connectionstyle="arc3,rad=0.1",
-                                   alpha=0.8)
+                                 edge_color=regular_edge_color,
+                                 width=2.5,
+                                 arrows=True,
+                                 arrowsize=30,
+                                 arrowstyle='-|>',
+                                 node_size=3500,
+                                 ax=ax,
+                                 connectionstyle="arc3,rad=0.1",
+                                 alpha=0.8)
 
+        # Draw critical edges with highlight
         if critical_edges:
+            # First draw a thicker highlight layer
             nx.draw_networkx_edges(graph, pos, edgelist=list(critical_edges),
-                                   edge_color=critical_path_highlight,
-                                   width=8,
-                                   arrows=True,
-                                   arrowsize=35,
-                                   arrowstyle='-|>',
-                                   node_size=3500,
-                                   ax=ax,
-                                   connectionstyle="arc3,rad=0.1",
-                                   alpha=0.3)
+                                 edge_color=critical_path_highlight,
+                                 width=8,
+                                 arrows=True,
+                                 arrowsize=35,
+                                 arrowstyle='-|>',
+                                 node_size=3500,
+                                 ax=ax,
+                                 connectionstyle="arc3,rad=0.1",
+                                 alpha=0.3)
+            # Then draw the actual critical edge
             nx.draw_networkx_edges(graph, pos, edgelist=list(critical_edges),
-                                   edge_color=critical_edge_color,
-                                   width=5,
-                                   arrows=True,
-                                   arrowsize=32,
-                                   arrowstyle='-|>',
-                                   node_size=3500,
-                                   ax=ax,
-                                   connectionstyle="arc3,rad=0.1",
-                                   alpha=0.9)
+                                 edge_color=critical_edge_color,
+                                 width=5,
+                                 arrows=True,
+                                 arrowsize=32,
+                                 arrowstyle='-|>',
+                                 node_size=3500,
+                                 ax=ax,
+                                 connectionstyle="arc3,rad=0.1",
+                                 alpha=0.9)
 
+        # Add node labels with ES/LF times if available
         if st.session_state.analysis_results:
             node_times = st.session_state.analysis_results.get('node_times', {})
             es_values = node_times.get('es', {})
@@ -395,6 +406,7 @@ class NetworkDiagramApp:
         else:
             enhanced_labels = {node: str(node) for node in all_nodes}
 
+        # Draw node labels
         for node, (x, y) in pos.items():
             label = enhanced_labels[node]
             color = 'darkred' if node in critical_nodes else 'darkgreen'
@@ -410,6 +422,7 @@ class NetworkDiagramApp:
                            edgecolor='none',
                            alpha=0.8))
 
+        # Add edge labels with activity names and durations
         edge_labels = {}
         for u, v, data in graph.edges(data=True):
             activity = data['activity']
@@ -420,6 +433,7 @@ class NetworkDiagramApp:
             else:
                 edge_labels[(u, v)] = f"{activity}\n({duration}d)"
 
+        # Draw edge labels
         for (u, v), label in edge_labels.items():
             x1, y1 = pos[u]
             x2, y2 = pos[v]
@@ -441,11 +455,12 @@ class NetworkDiagramApp:
                            alpha=0.95,
                            linewidth=2 if is_critical else 1))
 
+        # Add title and project duration
         ax.set_title("Project Network Diagram with Critical Path Analysis",
-                     fontsize=20,
-                     fontweight='bold',
-                     pad=40,
-                     color='#1a237e')
+                   fontsize=20,
+                   fontweight='bold',
+                   pad=40,
+                   color='#1a237e')
 
         if st.session_state.project_duration:
             ax.text(0.5, 0.95, f"Project Duration: {st.session_state.project_duration} days",
@@ -457,6 +472,7 @@ class NetworkDiagramApp:
 
         ax.axis('off')
 
+        # Add legend
         from matplotlib.lines import Line2D
         legend_elements = [
             Line2D([0], [0], marker='o', color='w',
@@ -486,6 +502,7 @@ class NetworkDiagramApp:
                  title="Legend",
                  title_fontsize=14)
 
+        # Add critical path text if available
         if st.session_state.critical_path_nodes:
             path_text = " → ".join(str(node) for node in st.session_state.critical_path_nodes)
             ax.text(0.02, 0.02, f"Critical Path: {path_text}",
