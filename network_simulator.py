@@ -731,7 +731,7 @@ def main():
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: #666; padding: 1rem;'>"
-        "Web Application |  Developed with 🧡 by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy"
+        "Web Application |  Developed with 🤍 by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy"
         "</div>",
         unsafe_allow_html=True
     )
