@@ -35,7 +35,7 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
     .footer {
-        position: fixed;
+        position: static;
         left: 0;
         bottom: 0;
         width: 100%;
