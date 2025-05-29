@@ -705,8 +705,9 @@ def main():
         simple_df = pd.DataFrame(st.session_state.activities, columns=['Activity ID', 'Start Node', 'End Node', 'Duration (days)'])
         simple_df['Duration (days)'] = simple_df['Duration (days)'].map(lambda x: f"{x:.1f}")
         st.dataframe(simple_df, use_container_width=True, hide_index=True)
- st.markdown("---")
+ 
     # Footer
+st.markdown("---")
 st.markdown("""
 <div class="footer">
     Web Application |  Developed with 🧡 by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy
