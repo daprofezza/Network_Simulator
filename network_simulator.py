@@ -8,7 +8,7 @@ import numpy as np
 
 # Page configuration
 st.set_page_config(
-    page_title="Network Diagram Simulator",
+    page_title="SJC Network Diagram Simulator",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
