@@ -34,17 +34,6 @@ st.markdown("""
         margin-bottom: 2rem;
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
-    .footer {
-        position: static;
-        left: 0;
-        bottom: 0;
-        width: 100%;
-        background-color: #5D4037;
-        color: #FFFFFF;
-        text-align: center;
-        padding: 10px 0;
-        font-size: 0.8rem;
-    }
     .metric-container { /* This class is defined but not explicitly used on st.metric by default */
         background: white;
         padding: 1.5rem;
@@ -82,6 +71,17 @@ st.markdown("""
         border: none;
         font-weight: 600;
         transition: all 0.3s ease;
+    }
+    .footer {
+        position: static;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: #5D4037;
+        color: #FFFFFF;
+        text-align: center;
+        padding: 10px 0;
+        font-size: 0.8rem;
     }
 </style>
 """, unsafe_allow_html=True)
