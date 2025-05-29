@@ -72,6 +72,17 @@ st.markdown("""
         font-weight: 600;
         transition: all 0.3s ease;
     }
+    .footer {
+        position: fixed;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: #5D4037;
+        color: #FFFFFF;
+        text-align: center;
+        padding: 10px 0;
+        font-size: 0.8rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -695,14 +706,12 @@ def main():
         simple_df['Duration (days)'] = simple_df['Duration (days)'].map(lambda x: f"{x:.1f}")
         st.dataframe(simple_df, use_container_width=True, hide_index=True)
 
-    st.markdown("---")
-    st.markdown(
-        "<div style='text-align: center; color: #666; padding: 2rem 1rem; font-size: 0.9em;'>"
-        "Network Diagram Simulator | Web Application <br>"
-        "Developed with 🤍 by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy"
-        "</div>",
-        unsafe_allow_html=True
-    )
+    # Footer
+st.markdown("""
+<div class="footer">
+    Web Application |  Developed with 🧡 by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy
+</div>
+""", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
