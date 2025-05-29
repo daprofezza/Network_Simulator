@@ -25,6 +25,17 @@ st.markdown("""
     .critical-pulse {
         animation: pulse 2s ease-in-out infinite;
     }
+    .footer {
+        position: fixed;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: #5D4037;
+        color: #FFFFFF;
+        text-align: center;
+        padding: 10px 0;
+        font-size: 0.8rem;
+    }
     .main-header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -60,17 +71,6 @@ st.markdown("""
         padding: 1rem;
         border-radius: 8px;
         margin: 1rem 0;
-    }
-    .footer {
-        position: fixed;
-        left: 0;
-        bottom: 0;
-        width: 100%;
-        background-color: #5D4037;
-        color: #FFFFFF;
-        text-align: center;
-        padding: 10px 0;
-        font-size: 0.8rem;
     }
     .stDataFrame {
         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
