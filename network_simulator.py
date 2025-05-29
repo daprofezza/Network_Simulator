@@ -499,7 +499,7 @@ def main():
     app = NetworkDiagramApp()
     st.markdown("""
     <div class="main-header">
-        <h1>📊 Network Diagram Simulator</h1>
+        <h1>📊 SJC Network Diagram Simulator</h1>
         <p>A Tool for Critical Path Method (CPM) Analysis and Visualization</p>
     </div>
     """, unsafe_allow_html=True)
