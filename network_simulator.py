@@ -73,7 +73,7 @@ st.markdown("""
         transition: all 0.3s ease;
     }
     .footer {
-        position: sticky;
+        position: inherit;
         left: 0;
         bottom: 0;
         width: 100%;
