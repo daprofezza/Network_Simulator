@@ -707,7 +707,6 @@ def main():
         st.dataframe(simple_df, use_container_width=True, hide_index=True)
  
     # Footer
-st.markdown("---")
 st.markdown("""
 <div class="footer">
     Web Application |  Developed with 🧡 by J. Inigo Papu Vinodhan, Asst. Prof., BBA Dept., St. Joseph's College, Trichy
