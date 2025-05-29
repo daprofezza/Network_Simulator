@@ -61,17 +61,6 @@ st.markdown("""
         border-radius: 8px;
         margin: 1rem 0;
     }
-    .stDataFrame {
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        border-radius: 10px;
-    }
-    .sidebar .stButton > button {
-        width: 100%;
-        border-radius: 8px;
-        border: none;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
     .footer {
         position: fixed;
         left: 0;
@@ -82,6 +71,17 @@ st.markdown("""
         text-align: center;
         padding: 10px 0;
         font-size: 0.8rem;
+    }
+    .stDataFrame {
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        border-radius: 10px;
+    }
+    .sidebar .stButton > button {
+        width: 100%;
+        border-radius: 8px;
+        border: none;
+        font-weight: 600;
+        transition: all 0.3s ease;
     }
 </style>
 """, unsafe_allow_html=True)
